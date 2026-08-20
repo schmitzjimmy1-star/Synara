@@ -5,8 +5,6 @@ import { Effect, Exit, FileSystem, Layer, Path, Schema, Scope, ServiceMap } from
 import { HttpRouter } from "effect/unstable/http";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
-import { agentGatewayRouteLayer } from "./agentGateway/httpRoute";
-import { AgentGatewayCredentials } from "./agentGateway/Services/AgentGatewayCredentials";
 import {
   clearPersistedServerRuntimeState,
   makePersistedServerRuntimeState,
@@ -50,7 +48,6 @@ export interface ServerShape {
     ServerLifecycleError | ServerSettingsError,
     | Scope.Scope
     | ServerConfig
-    | AgentGatewayCredentials
     | ExternalMcpGateway
     | ExternalMcpService
     | FileSystem.FileSystem
@@ -113,7 +110,6 @@ export const createEffectServer = Effect.fn(function* (
       cause: new Error(remotePolicyError),
     });
   }
-  const agentGatewayCredentials = yield* AgentGatewayCredentials;
   const keybindings = yield* Keybindings;
   const managedAttachmentCleanup = yield* ManagedAttachmentCleanup;
   const lifecycleEvents = yield* ServerLifecycleEvents;
@@ -155,7 +151,6 @@ export const createEffectServer = Effect.fn(function* (
   const routesLayer = Layer.mergeAll(
     makeEffectHttpRouteLayer(readiness, shutdownController),
     websocketRpcRouteLayer,
-    agentGatewayRouteLayer,
     externalMcpRouteLayer,
   );
   const httpApp = yield* HttpRouter.toHttpEffect(routesLayer);
@@ -169,7 +164,6 @@ export const createEffectServer = Effect.fn(function* (
     (nodeServer as http.Server | null)?.address() ?? null,
     config.port,
   );
-  agentGatewayCredentials.setListeningPort(listeningPort);
   yield* persistServerRuntimeState({
     path: config.serverRuntimeStatePath,
     state: makePersistedServerRuntimeState({

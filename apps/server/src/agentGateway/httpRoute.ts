@@ -9,60 +9,16 @@
  *
  * @module agentGateway/httpRoute
  */
-import { Effect, Layer, Stream } from "effect";
+import { Effect, Layer } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import { AGENT_GATEWAY_MCP_PATH } from "./Layers/AgentGatewayCredentials";
 import { AgentGateway } from "./Services/AgentGateway";
 import { AgentGatewayCredentials } from "./Services/AgentGatewayCredentials";
 import { extractBearerToken } from "./bearerToken.ts";
+import { readMcpJsonBody } from "../mcpJsonBody.ts";
 
 export const AGENT_GATEWAY_MCP_MAX_BODY_BYTES = 1024 * 1024;
-
-const BODY_TOO_LARGE = Symbol("AgentGatewayMcpBodyTooLarge");
-
-export type McpBodyReadResult =
-  | { readonly kind: "ok"; readonly body: unknown }
-  | { readonly kind: "invalid" }
-  | { readonly kind: "too-large" };
-
-export function readMcpJsonBody(
-  request: HttpServerRequest.HttpServerRequest,
-  maxBytes = AGENT_GATEWAY_MCP_MAX_BODY_BYTES,
-): Effect.Effect<McpBodyReadResult> {
-  const declaredLength = Number.parseInt(request.headers["content-length"] ?? "", 10);
-  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
-    return Effect.succeed({ kind: "too-large" });
-  }
-
-  return request.stream.pipe(
-    Stream.runFoldEffect(
-      () => ({ chunks: [] as Buffer[], totalBytes: 0 }),
-      (state, chunk) => {
-        const totalBytes = state.totalBytes + chunk.byteLength;
-        if (totalBytes > maxBytes) {
-          return Effect.fail(BODY_TOO_LARGE);
-        }
-        state.chunks.push(Buffer.from(chunk));
-        return Effect.succeed({ chunks: state.chunks, totalBytes });
-      },
-    ),
-    Effect.flatMap(({ chunks, totalBytes }) =>
-      Effect.try({
-        try: () => ({
-          kind: "ok" as const,
-          body: JSON.parse(Buffer.concat(chunks, totalBytes).toString("utf8")) as unknown,
-        }),
-        catch: () => new Error("Invalid JSON body."),
-      }),
-    ),
-    Effect.catch((error) =>
-      Effect.succeed<McpBodyReadResult>(
-        error === BODY_TOO_LARGE ? { kind: "too-large" } : { kind: "invalid" },
-      ),
-    ),
-  );
-}
 
 function unauthorizedResponse() {
   return HttpServerResponse.jsonUnsafe(
@@ -91,7 +47,7 @@ const postRouteLayer = HttpRouter.add(
       return unauthorizedResponse();
     }
 
-    const bodyResult = yield* readMcpJsonBody(request);
+    const bodyResult = yield* readMcpJsonBody(request, AGENT_GATEWAY_MCP_MAX_BODY_BYTES);
     if (bodyResult.kind === "too-large") {
       return HttpServerResponse.jsonUnsafe(
         {

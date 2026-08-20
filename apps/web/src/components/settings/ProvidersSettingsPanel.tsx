@@ -74,6 +74,7 @@ type ProviderInstallTextKey =
   | "claudeBinaryPath"
   | "codexBinaryPath"
   | "codexHomePath"
+  | "codexProfile"
   | "cursorBinaryPath"
   | "cursorApiEndpoint"
   | "antigravityBinaryPath"
@@ -153,7 +154,20 @@ const ALL_PROVIDER_INSTALL_SETTINGS: readonly ProviderInstallSettings[] = [
         settingsKey: "codexHomePath",
         label: "CODEX_HOME path",
         placeholder: "CODEX_HOME",
-        description: "Optional custom Codex home and config directory.",
+        description:
+          "Leave blank to use ~/.codex so Synara shares your Codex MCPs, plugins, skills, and state.",
+      },
+      {
+        kind: "text",
+        settingsKey: "codexProfile",
+        label: "Codex profile",
+        placeholder: "openrouter",
+        description: (
+          <>
+            Optional profile layered from <code>$CODEX_HOME/&lt;name&gt;.config.toml</code>. Use{" "}
+            <code>openrouter</code> for OpenRouter inference without isolating MCPs.
+          </>
+        ),
       },
     ],
   },

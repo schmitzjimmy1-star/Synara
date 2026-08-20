@@ -21,10 +21,7 @@ interface ComposerInputBannersProps {
   planFollowUp: { id: string; title: string | null } | null;
 }
 
-export function ComposerInputBanners({
-  roundedTopReset,
-  planFollowUp,
-}: ComposerInputBannersProps) {
+export function ComposerInputBanners({ roundedTopReset, planFollowUp }: ComposerInputBannersProps) {
   let content: ReactNode = null;
   if (planFollowUp) {
     content = <ComposerPlanFollowUpBanner key={planFollowUp.id} planTitle={planFollowUp.title} />;

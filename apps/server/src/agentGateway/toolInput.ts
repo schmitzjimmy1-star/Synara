@@ -9,9 +9,7 @@ import { Schema } from "effect";
 
 import { AGENT_GATEWAY_TARGET_OPTIONS_DESCRIPTION } from "./targetResolver.ts";
 
-export const PROVIDER_KINDS: ReadonlyArray<ProviderKind> = [
-  "codex",
-];
+export const PROVIDER_KINDS: ReadonlyArray<ProviderKind> = ["codex"];
 
 export const MODEL_SELECTION_INPUT_SCHEMA = {
   type: "object",

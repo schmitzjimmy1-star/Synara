@@ -14,6 +14,7 @@ describe("isProviderInstallSettingsDirty", () => {
     const dirtyPatches = [
       { codexBinaryPath: "/opt/codex" },
       { codexHomePath: "/tmp/codex-home" },
+      { codexProfile: "openrouter" },
     ] satisfies ReadonlyArray<Partial<AppSettings>>;
 
     expect(isProviderInstallSettingsDirty(defaults, defaults)).toBe(false);
@@ -46,8 +47,8 @@ describe("createProviderInstallResetPatch", () => {
       openCodeServerPassword: "",
     });
 
-    expect(Object.keys(patch).sort()).toEqual(
-      ["codexBinaryPath", "codexHomePath"].sort(),
+    expect(Object.keys(patch).toSorted()).toEqual(
+      ["codexBinaryPath", "codexHomePath", "codexProfile"].toSorted(),
     );
   });
 });

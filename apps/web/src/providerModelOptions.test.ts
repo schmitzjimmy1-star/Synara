@@ -64,17 +64,50 @@ describe("formatProviderModelOptionName", () => {
     ).toBe("GPT-5");
   });
 
-  it("leaves non-OpenCode unknown slugs unchanged", () => {
+  it("formats the model portion of custom Codex provider slugs", () => {
     expect(
       formatProviderModelOptionName({
         provider: "codex",
         slug: "custom/internal-model",
       }),
-    ).toBe("custom/internal-model");
+    ).toBe("Internal Model");
   });
 });
 
 describe("mergeDynamicModelOptions", () => {
+  it("treats the live Codex catalog as authoritative while preserving custom slugs", () => {
+    expect(
+      mergeDynamicModelOptions({
+        provider: "codex",
+        staticOptions: [
+          { slug: "gpt-5.5", name: "GPT-5.5" },
+          { slug: "openai/gpt-5.6-sol", name: "GPT-5.6 Sol", isCustom: true },
+          { slug: "anthropic/claude-sonnet-5", name: "Claude Sonnet 5", isCustom: true },
+        ],
+        dynamicModels: [
+          {
+            slug: "openai/gpt-5.6-sol",
+            name: "openai/gpt-5.6-sol",
+            upstreamProviderId: "openai",
+            upstreamProviderName: "OpenAI",
+          },
+        ],
+      }),
+    ).toEqual([
+      {
+        slug: "openai/gpt-5.6-sol",
+        name: "GPT-5.6 Sol",
+        upstreamProviderId: "openai",
+        upstreamProviderName: "OpenAI",
+      },
+      {
+        slug: "anthropic/claude-sonnet-5",
+        name: "Claude Sonnet 5",
+        isCustom: true,
+      },
+    ]);
+  });
+
   it("does not offer Pi Anthropic models when discovery only returns local models", () => {
     expect(
       mergeDynamicModelOptions({

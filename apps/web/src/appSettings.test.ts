@@ -122,7 +122,7 @@ describe("getAppModelOptions", () => {
 
     expect(options.at(-1)).toEqual({
       slug: "custom/selected-model",
-      name: "custom/selected-model",
+      name: "Selected Model",
       provider: "codex",
       isCustom: true,
     });
@@ -204,7 +204,7 @@ describe("getGitTextGenerationModelOptions", () => {
 
     expect(options.at(-1)).toEqual({
       slug: "openrouter/custom-model",
-      name: "openrouter/custom-model",
+      name: "Custom Model",
       provider: "codex",
       isCustom: true,
     });
@@ -221,7 +221,7 @@ describe("getGitTextGenerationModelOptions", () => {
 
     expect(options.at(-1)).toEqual({
       slug: "opencode-go/kimi-k2.6",
-      name: "opencode-go/kimi-k2.6",
+      name: "Kimi K2.6",
       provider: "codex",
       isCustom: true,
     });
@@ -302,7 +302,7 @@ describe("resolveAppModelSelection", () => {
         },
         "",
       ),
-    ).toBe("openai/gpt-5.6-sol");
+    ).toBe("gpt-5.5");
   });
 
   it("resolves display names through the shared resolver", () => {
@@ -509,6 +509,7 @@ describe("getProviderStartOptions", () => {
         claudeBinaryPath: "/usr/local/bin/claude",
         codexBinaryPath: "",
         codexHomePath: "/Users/you/.codex",
+        codexProfile: "",
         cursorApiEndpoint: "http://localhost:3000",
         cursorBinaryPath: "/usr/local/bin/agent",
         antigravityBinaryPath: "/usr/local/bin/agy",
@@ -548,6 +549,7 @@ describe("getProviderStartOptions", () => {
         claudeBinaryPath: "",
         codexBinaryPath: "",
         codexHomePath: "",
+        codexProfile: "",
         cursorApiEndpoint: "",
         cursorBinaryPath: "",
         antigravityBinaryPath: "",
@@ -570,6 +572,7 @@ describe("getProviderStartOptions", () => {
         claudeBinaryPath: "claude",
         codexBinaryPath: "codex",
         codexHomePath: "",
+        codexProfile: "",
         cursorApiEndpoint: "",
         cursorBinaryPath: "cursor-agent",
         antigravityBinaryPath: "agy",

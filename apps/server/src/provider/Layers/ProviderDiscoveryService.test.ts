@@ -1,7 +1,6 @@
 // FILE: ProviderDiscoveryService.test.ts
-// Purpose: Verifies the discovery service merges provider-native skills with the
-//          unified Synara catalog, filters user-disabled skills, and reports
-//          skill discovery as supported for every provider.
+// Purpose: Verifies skill discovery delegates to the provider runtime and applies
+//          Synara's visibility settings without inventing a second skill catalog.
 // Layer: Server provider tests
 
 import { mkdtempSync, rmSync } from "node:fs";
@@ -39,14 +38,6 @@ let root: string;
 let homeDir: string;
 let baseDir: string;
 let cwd: string;
-
-async function writeSkill(skillDir: string, name: string): Promise<void> {
-  await mkdir(skillDir, { recursive: true });
-  await writeFile(
-    path.join(skillDir, "SKILL.md"),
-    `---\nname: ${name}\ndescription: ${name} description\n---\n\n# ${name}\n`,
-  );
-}
 
 const makeConfigLayer = () =>
   Layer.effect(
@@ -155,18 +146,13 @@ afterEach(() => {
 });
 
 describe("ProviderDiscoveryService.listSkills", () => {
-  it("serves the unified catalog for providers without native skill discovery", async () => {
-    await writeSkill(path.join(baseDir, "skills", "portable"), "portable");
-
+  it("returns no skills when the provider has no native discovery", async () => {
     const result = await runListSkills({ adapter: {}, provider: "antigravity" });
 
-    expect(result.skills.map((skill) => skill.name)).toEqual(["portable"]);
+    expect(result).toEqual({ skills: [], source: "unsupported", cached: false });
   });
 
-  it("prefers provider-native entries and appends catalog-only skills", async () => {
-    await writeSkill(path.join(baseDir, "skills", "shared"), "shared");
-    await writeSkill(path.join(baseDir, "skills", "portable"), "portable");
-
+  it("returns only provider-native entries", async () => {
     const nativeShared = {
       name: "shared",
       path: path.join(homeDir, ".codex", "skills", "shared", "SKILL.md"),
@@ -181,27 +167,34 @@ describe("ProviderDiscoveryService.listSkills", () => {
       provider: "codex",
     });
 
-    const shared = result.skills.find((skill) => skill.name === "shared");
-    expect(shared?.path).toBe(nativeShared.path);
-    expect(result.skills.some((skill) => skill.name === "portable")).toBe(true);
+    expect(result).toEqual({
+      skills: [nativeShared],
+      source: "codex-app-server",
+      cached: false,
+    });
   });
 
-  it("filters user-disabled skills from merged results", async () => {
-    await writeSkill(path.join(baseDir, "skills", "portable"), "portable");
-    await writeSkill(path.join(baseDir, "skills", "muted"), "muted");
-
+  it("filters user-disabled skills from native results", async () => {
     const result = await runListSkills({
-      adapter: {},
+      adapter: {
+        listSkills: () =>
+          Effect.succeed({
+            skills: [
+              { name: "portable", path: "/codex/portable/SKILL.md", enabled: true },
+              { name: "muted", path: "/codex/muted/SKILL.md", enabled: true },
+            ],
+            source: "codex-app-server",
+            cached: false,
+          }),
+      },
       disabled: ["Muted"],
-      provider: "opencode",
+      provider: "codex",
     });
 
     expect(result.skills.map((skill) => skill.name)).toEqual(["portable"]);
   });
 
-  it("falls back to the catalog when native discovery fails", async () => {
-    await writeSkill(path.join(baseDir, "skills", "portable"), "portable");
-
+  it("fails closed when native discovery fails", async () => {
     const result = await runListSkills({
       adapter: {
         listSkills: () =>
@@ -216,12 +209,16 @@ describe("ProviderDiscoveryService.listSkills", () => {
       provider: "codex",
     });
 
-    expect(result.skills.map((skill) => skill.name)).toEqual(["portable"]);
+    expect(result).toEqual({
+      skills: [],
+      source: "provider.discovery.failed",
+      cached: false,
+    });
   });
 });
 
 describe("ProviderDiscoveryService.getComposerCapabilities", () => {
-  it("reports skill discovery as supported even when the adapter declines it", async () => {
+  it("preserves the provider's unsupported skill capabilities", async () => {
     const baseLayer = Layer.mergeAll(
       makeConfigLayer(),
       ServerSettingsService.layerTest(),
@@ -237,8 +234,8 @@ describe("ProviderDiscoveryService.getComposerCapabilities", () => {
       program as unknown as Effect.Effect<ProviderComposerCapabilities, never, never>,
     );
 
-    expect(capabilities.supportsSkillDiscovery).toBe(true);
-    expect(capabilities.supportsSkillMentions).toBe(true);
+    expect(capabilities.supportsSkillDiscovery).toBe(false);
+    expect(capabilities.supportsSkillMentions).toBe(false);
   });
 });
 
@@ -285,7 +282,11 @@ describe("ProviderDiscoveryService.listModels", () => {
       enabled: true,
     });
 
-    expect(result.models).toEqual([{ slug: "cursor-model", name: "Cursor Model" }]);
+    expect(result.models).toEqual([
+      { slug: "cursor-model", name: "Cursor Model" },
+      { slug: "valid-model", name: "valid-model" },
+      { slug: "invalid-model", name: "invalid-model" },
+    ]);
     expect(result.source).toBe("cursor.cli+curated");
     expect(adapterCalls).toBe(1);
     expect(receivedInput).toMatchObject({
@@ -295,7 +296,7 @@ describe("ProviderDiscoveryService.listModels", () => {
     });
   });
 
-  it("omits malformed model descriptors while preserving valid entries", async () => {
+  it("repairs malformed configured model descriptors with allowlist metadata", async () => {
     const result = await runListModels({
       adapter: {
         listModels: () =>
@@ -312,7 +313,11 @@ describe("ProviderDiscoveryService.listModels", () => {
     });
 
     expect(result).toEqual({
-      models: [{ slug: "valid-model", name: "Valid Model" }],
+      models: [
+        { slug: "cursor-model", name: "cursor-model" },
+        { slug: "valid-model", name: "Valid Model" },
+        { slug: "invalid-model", name: "invalid-model" },
+      ],
       source: "cursor.cli+curated",
       cached: false,
     });

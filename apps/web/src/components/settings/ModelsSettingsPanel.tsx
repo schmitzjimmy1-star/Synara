@@ -307,8 +307,8 @@ export function ModelsSettingsPanel({
 
       <SettingsSection title="Custom models">
         <SettingsRow
-          title="Saved model slugs"
-          description="Add custom model slugs for supported providers."
+          title="Composer model allowlist"
+          description="Codex runs the task. If its CODEX_HOME uses OpenRouter, add exact OpenRouter slugs here; only these models appear in the composer."
           resetAction={
             savedCustomModelRows.length > 0 ? (
               <SettingResetButton label="custom models" onClick={resetCustomModels} />

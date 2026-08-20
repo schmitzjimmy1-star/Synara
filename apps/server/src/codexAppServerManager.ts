@@ -4,7 +4,6 @@ import { EventEmitter } from "node:events";
 
 import {
   ApprovalRequestId,
-  BROWSER_TOOL_NAMES,
   EventId,
   type ProviderComposerCapabilities,
   ProviderItemId,
@@ -51,7 +50,6 @@ import {
   buildCodexMcpConfigToml,
   SYNARA_AGENT_GATEWAY_TOKEN_ENV,
 } from "./agentGateway/mcpInjection.ts";
-import { SYNARA_GATEWAY_HARNESS_POLICY } from "./agentGateway/harnessPolicy.ts";
 import {
   AGENT_GATEWAY_TURN_AUTHORITY_RETIRED,
   type AgentGatewaySessionLease,
@@ -418,23 +416,6 @@ export function readCodexAccountSnapshot(response: unknown): CodexAccountSnapsho
   };
 }
 
-const CODEX_BROWSER_TOOL_ROUTING_INSTRUCTIONS = `
-
-## Browser tool routing
-
-Prefer Synara's built-in browser for browser work. It may continue in the background without changing the user's active chat. In code mode, call its MCP methods directly inside \`functions.exec\` with the exact \`tools.mcp__synara__browser_*\` prefix (for example, \`await tools.mcp__synara__browser_open({ url })\` and \`await tools.mcp__synara__browser_snapshot({})\`). The available suffixes are ${BROWSER_TOOL_NAMES.map((name) => `\`${name.slice("browser_".length)}\``).join(", ")}.
-
-For element actions, keep the \`snapshotId\` returned by the fresh snapshot and use the exact shapes \`browser_type({ target: { ref, snapshotId }, text })\`, \`browser_click({ target: { ref, snapshotId } })\`, and \`browser_press({ keys: ["Enter"] })\`. Wait for observable changes with \`browser_wait({ conditions: [{ kind: "url", glob: "*expected*" }] })\` or another published condition. Never pass a bare \`ref\` without its \`snapshotId\`.
-
-Do not search or filter \`ALL_TOOLS\` to discover these methods. When several browser steps are deterministic, run their awaited MCP calls sequentially in one \`functions.exec\` invocation, inspect each result there, and stop as soon as the requested result is verified. Take a fresh semantic snapshot before element actions and after navigation or human interaction.
-
-Use \`Computer Use\` only when at least one of these is true:
-- the user explicitly asks to use \`Computer Use\`
-- the task is outside the in-app browser (desktop apps, OS settings, system UI, other app windows)
-- the in-app browser cannot complete the task and a broader desktop fallback is required
-
-Do not choose \`Computer Use\` first for ordinary browser inspection, browser screenshots, or browser navigation when the in-app browser can handle the request.`;
-
 export const CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS = `<collaboration_mode># Plan Mode (Conversational)
 
 You work in 3 phases, and you should *chat your way* to a great plan before finalizing it. A great plan is very detailed-intent- and implementation-wise-so that it can be handed to another engineer or agent to be implemented right away. It must be **decision complete**, where the implementer does not need to make any decisions.
@@ -555,7 +536,7 @@ plan content should be human and agent digestible. The final plan must be plan-o
 Do not ask "should I proceed?" in the final output. The user can easily switch out of Plan mode and request implementation if you have included a \`<proposed_plan>\` block in your response. Alternatively, they can decide to stay in Plan mode and continue refining the plan.
 
 Only produce at most one \`<proposed_plan>\` block per turn, and only when you are presenting a complete spec.
-</collaboration_mode>${CODEX_BROWSER_TOOL_ROUTING_INSTRUCTIONS}\n\n${SYNARA_GATEWAY_HARNESS_POLICY}`;
+</collaboration_mode>`;
 
 export const CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS = `<collaboration_mode># Collaboration Mode: Default
 
@@ -568,7 +549,7 @@ Your active mode changes only when new developer instructions with a different \
 The \`request_user_input\` tool is unavailable in Default mode. If you call it while in Default mode, it will return an error.
 
 In Default mode, strongly prefer making reasonable assumptions and executing the user's request rather than stopping to ask questions. If you absolutely must ask a question because the answer cannot be discovered from local context and a reasonable assumption would be risky, ask the user directly with a concise plain-text question. Never write a multiple choice question as a textual assistant message.
-</collaboration_mode>${CODEX_BROWSER_TOOL_ROUTING_INSTRUCTIONS}\n\n${SYNARA_GATEWAY_HARNESS_POLICY}`;
+</collaboration_mode>`;
 
 // Maps Synara's simple runtime toggle to Codex thread-level permission overrides.
 function mapCodexRuntimeMode(runtimeMode: RuntimeMode): {
@@ -968,7 +949,6 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
   >();
 
   private runPromise: (effect: Effect.Effect<unknown, never>) => Promise<unknown>;
-  private readonly synaraSkillsDir: string | undefined;
   private readonly agentGatewayMcp:
     | {
         readonly endpointUrl: () => string;
@@ -980,7 +960,6 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
   constructor(
     services?: ServiceMap.ServiceMap<never>,
     options?: {
-      readonly synaraSkillsDir?: string;
       readonly agentGatewayMcp?: {
         readonly endpointUrl: () => string;
         readonly acquireSessionLease: (threadId: ThreadId) => AgentGatewaySessionLease;
@@ -991,7 +970,6 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
   ) {
     super();
     this.runPromise = services ? Effect.runPromiseWith(services) : Effect.runPromise;
-    this.synaraSkillsDir = options?.synaraSkillsDir;
     this.agentGatewayMcp = options?.agentGatewayMcp;
     this.teardownProcessTree = options?.teardownProcessTree ?? teardownProviderProcessTree;
     this.taskCompleteFallbackGraceMs = Math.max(0, options?.taskCompleteFallbackGraceMs ?? 750);
@@ -1003,9 +981,11 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
   private async buildSessionProcessEnv(
     homePath: string | undefined,
     gatewayBearerToken: string | undefined,
+    profile?: string,
   ) {
     const env = await buildCodexProcessEnv({
       ...(homePath ? { homePath } : {}),
+      ...(profile ? { profile } : {}),
       ...(this.agentGatewayMcp
         ? { appendConfigToml: buildCodexMcpConfigToml(this.agentGatewayMcp.endpointUrl()) }
         : {}),
@@ -1014,25 +994,6 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       env[SYNARA_AGENT_GATEWAY_TOKEN_ENV] = gatewayBearerToken;
     }
     return env;
-  }
-
-  // Registers `~/.synara/skills` as a codex skill root so portable skills are
-  // first-class: skills/list returns them and turn/start `skill` items inject
-  // their instructions. Verified live: skill items with paths outside known
-  // roots are silently ignored by codex app-server, so this call is required.
-  private async registerSynaraSkillsRoot(context: CodexSessionContext): Promise<void> {
-    if (!this.synaraSkillsDir) {
-      return;
-    }
-    try {
-      await this.sendRequest(context, "skills/extraRoots/set", {
-        extraRoots: [this.synaraSkillsDir],
-      });
-    } catch (error) {
-      // Older codex builds (< extra-roots support) keep working; Synara-only
-      // skills simply stay invisible to codex on those versions.
-      log.warn("skills/extraRoots/set unavailable", { error });
-    }
   }
 
   async startSession(input: CodexAppServerStartSessionInput): Promise<ProviderSession> {
@@ -1063,6 +1024,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       const codexOptions = readCodexProviderOptions(input);
       const codexBinaryPath = codexOptions.binaryPath ?? "codex";
       const codexHomePath = codexOptions.homePath;
+      const codexProfile = codexOptions.profile;
       await this.assertSupportedCodexCliVersion({
         binaryPath: codexBinaryPath,
         cwd: resolvedCwd,
@@ -1078,6 +1040,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         env: await this.buildSessionProcessEnv(
           codexHomePath,
           gatewaySessionLease?.connection.bearerToken,
+          codexProfile,
         ),
       });
 
@@ -1113,7 +1076,6 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       await this.sendRequest(context, "initialize", buildCodexInitializeParams());
 
       await this.writeMessage(context, { method: "initialized" });
-      await this.registerSynaraSkillsRoot(context);
       // Model discovery is lazy and cached by listModels(). Keeping model/list
       // out of this serial cold-start path avoids an otherwise unused request
       // with its own 20-second deadline.
@@ -1848,6 +1810,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       });
       const codexBinaryPath = codexOptions.binaryPath ?? "codex";
       const codexHomePath = codexOptions.homePath;
+      const codexProfile = codexOptions.profile;
       await this.assertSupportedCodexCliVersion({
         binaryPath: codexBinaryPath,
         cwd: resolvedCwd,
@@ -1863,6 +1826,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         env: await this.buildSessionProcessEnv(
           codexHomePath,
           gatewaySessionLease?.connection.bearerToken,
+          codexProfile,
         ),
       });
 
@@ -1893,7 +1857,6 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
 
       await this.sendRequest(context, "initialize", buildCodexInitializeParams());
       await this.writeMessage(context, { method: "initialized" });
-      await this.registerSynaraSkillsRoot(context);
       try {
         const accountReadResponse = await this.sendRequest(context, "account/read", {});
         context.account = readCodexAccountSnapshot(accountReadResponse);
@@ -2477,12 +2440,17 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     return result;
   }
 
-  async listModels(inputOrThreadId: string | {
-    readonly threadId?: string;
-    readonly cwd?: string;
-    readonly binaryPath?: string;
-    readonly homePath?: string;
-  } = {}): Promise<ProviderListModelsResult> {
+  async listModels(
+    inputOrThreadId:
+      | string
+      | {
+          readonly threadId?: string;
+          readonly cwd?: string;
+          readonly binaryPath?: string;
+          readonly homePath?: string;
+          readonly profile?: string;
+        } = {},
+  ): Promise<ProviderListModelsResult> {
     const input =
       typeof inputOrThreadId === "string" ? { threadId: inputOrThreadId } : inputOrThreadId;
     const cacheKey = JSON.stringify({
@@ -2490,6 +2458,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       cwd: input.cwd?.trim() || null,
       binaryPath: input.binaryPath?.trim() || "codex",
       homePath: input.homePath?.trim() || null,
+      profile: input.profile?.trim() || null,
     });
     const cached = getRecentCacheEntry(this.modelCache, cacheKey);
     if (cached && Date.now() - cached.cachedAt <= CODEX_MODEL_DISCOVERY_CACHE_TTL_MS) {
@@ -2505,33 +2474,39 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       input.cwd,
       input.binaryPath,
       input.homePath,
+      input.profile,
     );
     const modelsBySlug = new Map<string, ProviderListModelsResult["models"][number]>();
     let cursor: string | null = null;
     const seenCursors = new Set<string>();
     while (true) {
-      const response = await this.sendRequest<Record<string, unknown>>(context, "model/list", {
-        cursor,
-        limit: 100,
-        includeHidden: false,
-      });
+      const response: unknown = await this.sendRequest<Record<string, unknown>>(
+        context,
+        "model/list",
+        {
+          cursor,
+          limit: 100,
+          includeHidden: false,
+        },
+      );
       for (const model of parseCodexModelListResponse(response)) {
         modelsBySlug.set(model.slug, model);
       }
-      const responseRecord = response && typeof response === "object" ? response : {};
-      const resultRecord =
+      const responseRecord: Record<string, unknown> =
+        response && typeof response === "object" ? (response as Record<string, unknown>) : {};
+      const resultRecord: Record<string, unknown> =
         "result" in responseRecord &&
         responseRecord.result &&
         typeof responseRecord.result === "object"
-          ? responseRecord.result
+          ? (responseRecord.result as Record<string, unknown>)
           : responseRecord;
-      const nextCursorValue =
+      const nextCursorValue: unknown =
         "nextCursor" in resultRecord
           ? resultRecord.nextCursor
           : "next_cursor" in resultRecord
             ? resultRecord.next_cursor
             : null;
-      const nextCursor = typeof nextCursorValue === "string" ? nextCursorValue.trim() : "";
+      const nextCursor: string = typeof nextCursorValue === "string" ? nextCursorValue.trim() : "";
       if (!nextCursor) break;
       if (seenCursors.has(nextCursor)) {
         throw new Error(`Codex model discovery returned a repeated cursor: ${nextCursor}`);
@@ -2632,10 +2607,13 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     cwd?: string,
     binaryPath?: string,
     homePath?: string,
+    profile?: string,
   ): Promise<CodexSessionContext> {
     const normalizedThreadId = threadId?.trim();
     const normalizedCwd = cwd?.trim() || undefined;
-    const requiresDedicatedSession = Boolean(binaryPath?.trim() || homePath?.trim());
+    const requiresDedicatedSession = Boolean(
+      binaryPath?.trim() || homePath?.trim() || profile?.trim(),
+    );
     if (normalizedThreadId && !requiresDedicatedSession) {
       try {
         const session = this.requireSession(ThreadId.makeUnsafe(normalizedThreadId));
@@ -2660,8 +2638,8 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
           return activeSession;
         }
       }
-      return binaryPath?.trim() || homePath?.trim()
-        ? this.getOrCreateDiscoverySession(normalizedCwd, binaryPath, homePath)
+      return binaryPath?.trim() || homePath?.trim() || profile?.trim()
+        ? this.getOrCreateDiscoverySession(normalizedCwd, binaryPath, homePath, profile)
         : this.getOrCreateDiscoverySession(normalizedCwd);
     }
     const firstActive = requiresDedicatedSession
@@ -2672,8 +2650,8 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     if (firstActive) {
       return firstActive;
     }
-    return binaryPath?.trim() || homePath?.trim()
-      ? this.getOrCreateDiscoverySession(process.cwd(), binaryPath, homePath)
+    return binaryPath?.trim() || homePath?.trim() || profile?.trim()
+      ? this.getOrCreateDiscoverySession(process.cwd(), binaryPath, homePath, profile)
       : this.getOrCreateDiscoverySession(process.cwd());
   }
 
@@ -2761,14 +2739,16 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     cwd: string,
     binaryPath?: string,
     homePath?: string,
+    profile?: string,
   ): Promise<CodexSessionContext> {
     const normalizedCwd = cwd.trim() || process.cwd();
     const discoveryKey =
-      binaryPath?.trim() || homePath?.trim()
+      binaryPath?.trim() || homePath?.trim() || profile?.trim()
         ? JSON.stringify({
             cwd: normalizedCwd,
             binaryPath: binaryPath?.trim() || "codex",
             homePath: homePath?.trim() || null,
+            profile: profile?.trim() || null,
           })
         : normalizedCwd;
     const startup = this.discoverySessionStartups.get(discoveryKey);
@@ -2786,7 +2766,13 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       return existing;
     }
 
-    const nextStartup = this.createDiscoverySession(discoveryKey, normalizedCwd, binaryPath, homePath);
+    const nextStartup = this.createDiscoverySession(
+      discoveryKey,
+      normalizedCwd,
+      binaryPath,
+      homePath,
+      profile,
+    );
     this.discoverySessionStartups.set(discoveryKey, nextStartup);
     try {
       return await nextStartup;
@@ -2802,6 +2788,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     normalizedCwd: string,
     binaryPath?: string,
     homePath?: string,
+    profile?: string,
   ): Promise<CodexSessionContext> {
     const existing = this.discoverySessions.get(discoveryKey);
     if (existing) {
@@ -2817,7 +2804,10 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     const child = spawnCodexAppServer({
       binaryPath: binaryPath?.trim() || "codex",
       cwd: normalizedCwd,
-      env: await buildCodexProcessEnv({ ...(homePath?.trim() ? { homePath: homePath.trim() } : {}) }),
+      env: await buildCodexProcessEnv({
+        ...(homePath?.trim() ? { homePath: homePath.trim() } : {}),
+        ...(profile?.trim() ? { profile: profile.trim() } : {}),
+      }),
     });
     const context: CodexSessionContext = {
       session: {
@@ -2854,7 +2844,6 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     try {
       await this.sendRequest(context, "initialize", buildCodexInitializeParams());
       await this.writeMessage(context, { method: "initialized" });
-      await this.registerSynaraSkillsRoot(context);
       try {
         const accountReadResponse = await this.sendRequest(context, "account/read", {});
         context.account = readCodexAccountSnapshot(accountReadResponse);
@@ -4093,6 +4082,7 @@ function normalizeProviderThreadId(value: string | undefined): string | undefine
 function readCodexProviderOptions(input: CodexAppServerStartSessionInput): {
   readonly binaryPath?: string;
   readonly homePath?: string;
+  readonly profile?: string;
 } {
   const options = input.providerOptions?.codex;
   if (!options) {
@@ -4101,6 +4091,7 @@ function readCodexProviderOptions(input: CodexAppServerStartSessionInput): {
   return {
     ...(options.binaryPath ? { binaryPath: options.binaryPath } : {}),
     ...(options.homePath ? { homePath: options.homePath } : {}),
+    ...(options.profile ? { profile: options.profile } : {}),
   };
 }
 

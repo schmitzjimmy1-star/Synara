@@ -53,8 +53,6 @@ import {
   evaluateAcpTurnIdleTick,
   resolveAcpTurnIdleTimeoutMs,
 } from "../acp/AcpTurnIdleWatchdog.ts";
-import { AgentGatewayCredentials } from "../../agentGateway/Services/AgentGatewayCredentials.ts";
-import { acquireAgentGatewaySessionLease } from "../../agentGateway/sessionLease.ts";
 import { filterProviderPromptImageAttachments } from "../promptAttachments.ts";
 import { resolveProviderAttachmentPath } from "../providerAttachmentPaths.ts";
 import {
@@ -69,7 +67,6 @@ import { ServerConfig } from "../../config.ts";
 import { makeRuntimeTaskListItem } from "../runtimeTaskList.ts";
 import { extractProposedPlanMarkdown } from "../planMode.ts";
 import { appendFileAttachmentsPromptBlock } from "../attachmentProjection.ts";
-import { synaraSkillsDir } from "../skillsCatalog.ts";
 import { makeBoundedCallbackIngress } from "../boundedCallbackIngress.ts";
 import { assignDerivedProviderRuntimeEventIds } from "../providerRuntimeEventIdentity.ts";
 import {
@@ -1719,11 +1716,6 @@ function mapToRuntimeEvents(
 const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
   Effect.gen(function* () {
     const serverConfig = yield* Effect.service(ServerConfig);
-    // Optional so adapter tests can run without the gateway layer; when
-    // present, every session gets the synara_* MCP tools.
-    const agentGatewayCredentials = Option.getOrUndefined(
-      yield* Effect.serviceOption(AgentGatewayCredentials),
-    );
     const nativeEventLogger =
       options?.nativeEventLogger ??
       (options?.nativeEventLogPath !== undefined
@@ -1738,21 +1730,7 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
           return options.manager;
         }
         const services = yield* Effect.services<never>();
-        return (
-          options?.makeManager?.(services) ??
-          new CodexAppServerManager(services, {
-            synaraSkillsDir: synaraSkillsDir(serverConfig.baseDir),
-            ...(agentGatewayCredentials
-              ? {
-                  agentGatewayMcp: {
-                    endpointUrl: () => agentGatewayCredentials.mcpEndpointUrl,
-                    acquireSessionLease: (threadId) =>
-                      acquireAgentGatewaySessionLease(agentGatewayCredentials, threadId, PROVIDER)!,
-                  },
-                }
-              : {}),
-          })
-        );
+        return options?.makeManager?.(services) ?? new CodexAppServerManager(services);
       }),
       (manager) => Effect.promise(() => manager.stopAll()),
     );
@@ -2171,6 +2149,7 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
             ...(input.cwd ? { cwd: input.cwd } : {}),
             ...(input.binaryPath ? { binaryPath: input.binaryPath } : {}),
             ...(input.homePath ? { homePath: input.homePath } : {}),
+            ...(input.profile ? { profile: input.profile } : {}),
           }),
         catch: (cause) =>
           new ProviderAdapterRequestError({

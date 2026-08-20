@@ -18,9 +18,9 @@ export const WHATS_NEW_ENTRIES: readonly WhatsNewEntry[] = [
       },
       {
         id: "browser-pdf-mcp-core",
-        title: "Browser, PDF, and MCP surfaces preserved",
+        title: "Codex owns the agent runtime",
         description:
-          "The lean fork keeps browser automation, workspace PDF preview, and external MCP integrations while retired provider surfaces are removed.",
+          "Synara keeps its manual browser panel and workspace PDF preview while Codex owns agent tools, MCP servers, plugins, and skills.",
       },
     ],
   },

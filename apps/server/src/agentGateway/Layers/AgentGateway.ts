@@ -67,20 +67,16 @@ import { WRITE_TOOL_ANNOTATIONS, type ToolEntry } from "../toolRuntime.ts";
 import { makeAgentGatewayMcpTransport } from "../mcpTransport.ts";
 import { recoverInterruptedAgentGatewayOperations } from "../startupRecovery.ts";
 import { makeCreateThreadsHandler } from "../creationCoordinator.ts";
-import { makeAgentGatewayBrowserTools } from "../browserTools.ts";
-import { BrowserAutomationHost } from "../../browserAutomation/Services/BrowserAutomationHost.ts";
-import { makeBrowserAutomationHost } from "../../browserAutomation/Layers/BrowserAutomationHost.ts";
 import { makeThreadReadTools } from "../threadReadTools.ts";
 import { makeThreadDiagnosticTools } from "../threadDiagnosticTools.ts";
 import { pruneProjectedArchivedManagedWorktrees } from "../../managedWorktrees.ts";
-import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 
 // Providers already receive the versioned host policy exactly once in their
 // private prompt. MCP clients prepend initialize.instructions to every exposed
 // tool definition, so repeating the full policy here adds tens of thousands of
 // context characters per round without adding authority or safety.
 const AGENT_GATEWAY_INSTRUCTIONS =
-  "Synara tools are thread-scoped. Use browser_* only for Synara's shared in-app browser runtime; follow the provider-delivered <synara_host_context> for full policy.";
+  "Synara tools are thread-scoped and manage Synara resources only. Codex owns general tool selection and execution; follow the provider-delivered <synara_host_context> for full policy.";
 
 function readThreadGoalArg(args: Record<string, unknown>): string {
   if (!("goal" in args)) {
@@ -117,10 +113,6 @@ export const makeAgentGateway = Effect.gen(function* () {
   const providerRuntimeEvents = yield* ProviderRuntimeEventRepository;
   const diagnostics = yield* ThreadDiagnosticsQuery;
   const serverConfig = yield* ServerConfig;
-  const browserAutomationHost = Option.getOrElse(
-    yield* Effect.serviceOption(BrowserAutomationHost),
-    () => makeBrowserAutomationHost({}),
-  );
   const loadProviderAvailabilities = Effect.gen(function* () {
     const [settings, statuses] = yield* Effect.all([
       serverSettings.getSettings,
@@ -129,30 +121,26 @@ export const makeAgentGateway = Effect.gen(function* () {
     const statusByProvider = new Map<ProviderKind, ServerProviderStatus>(
       statuses.map((status) => [status.provider, status]),
     );
-    return new Map<ProviderKind, AgentGatewayProviderAvailability>(
-      PROVIDER_KINDS.map((provider) => {
-        const status = statusByProvider.get(provider);
-        return [
-          provider,
-          {
-            enabled: settings.providers[provider].enabled,
-            defaultModel:
-              provider === "codex" &&
-              settings.providers.codex.homePath.trim().length > 0 &&
-              settings.providers.codex.customModels.includes(OPENROUTER_CODEX_DEFAULT_MODEL)
-                ? OPENROUTER_CODEX_DEFAULT_MODEL
-                : undefined,
-            ...(status
-              ? {
-                  available: status.available,
-                  authStatus: status.authStatus,
-                  ...(status.message ? { message: status.message } : {}),
-                }
-              : {}),
-          },
-        ];
-      }),
-    );
+    const status = statusByProvider.get("codex");
+    return new Map<ProviderKind, AgentGatewayProviderAvailability>([
+      [
+        "codex",
+        {
+          enabled: settings.providers.codex.enabled,
+          ...(settings.providers.codex.homePath.trim().length > 0 &&
+          settings.providers.codex.customModels.includes(OPENROUTER_CODEX_DEFAULT_MODEL)
+            ? { defaultModel: OPENROUTER_CODEX_DEFAULT_MODEL }
+            : {}),
+          ...(status
+            ? {
+                available: status.available,
+                authStatus: status.authStatus,
+                ...(status.message ? { message: status.message } : {}),
+              }
+            : {}),
+        },
+      ],
+    ]);
   });
 
   yield* recoverInterruptedAgentGatewayOperations({
@@ -677,23 +665,6 @@ export const makeAgentGateway = Effect.gen(function* () {
       }).pipe(Effect.catch((error) => Effect.succeed(mcpToolResultError(errorText(error))))),
   };
 
-  const browserTools = makeAgentGatewayBrowserTools(browserAutomationHost, {
-    resolveWorkspaceRoot: (context) =>
-      Effect.gen(function* () {
-        const thread = yield* requireThreadShell(context.callerThreadId);
-        const project = yield* snapshotQuery
-          .getProjectShellById(thread.projectId)
-          .pipe(Effect.map(Option.getOrNull));
-        if (!project) return null;
-        return (
-          resolveThreadWorkspaceCwd({
-            thread,
-            projects: [project],
-          }) ?? null
-        );
-      }).pipe(Effect.orElseSucceed(() => null)),
-  });
-
   const tools: ReadonlyArray<ToolEntry> = [
     ...readTools,
     ...diagnosticTools,
@@ -704,7 +675,6 @@ export const makeAgentGateway = Effect.gen(function* () {
     setThreadTitle,
     setThreadArchived,
     setThreadGoal,
-    ...browserTools,
   ];
   return {
     handleMcpPost: makeAgentGatewayMcpTransport({

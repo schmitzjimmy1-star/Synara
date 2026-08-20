@@ -81,7 +81,12 @@ export function formatProviderModelOptionName(input: {
     return trimmedSlug;
   }
 
-  if (input.provider === "kilo" || input.provider === "opencode" || input.provider === "pi") {
+  if (
+    input.provider === "codex" ||
+    input.provider === "kilo" ||
+    input.provider === "opencode" ||
+    input.provider === "pi"
+  ) {
     const modelIdentifier = trimmedSlug.includes("/")
       ? trimmedSlug.slice(trimmedSlug.lastIndexOf("/") + 1)
       : trimmedSlug;
@@ -203,7 +208,8 @@ export function mergeDynamicModelOptions(input: {
     (model) => !("isCustom" in model) || model.isCustom !== true,
   );
   const missingStaticBuiltIns =
-    (input.provider === "antigravity" ||
+    (input.provider === "codex" ||
+      input.provider === "antigravity" ||
       input.provider === "kilo" ||
       input.provider === "opencode" ||
       input.provider === "cursor" ||

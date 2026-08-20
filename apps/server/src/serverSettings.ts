@@ -311,30 +311,34 @@ const makeServerSettings = Effect.gen(function* () {
       ),
     );
 
-  const detectedOpenRouterHome = path.join(homeDir, ".codex-openrouter");
+  const detectedOpenRouterHome = path.join(homeDir, ".codex");
+  const detectedOpenRouterProfile = "openrouter";
+  const legacyOpenRouterHome = path.join(homeDir, ".codex-openrouter");
   const defaultSettings = fs
-    .readFileString(path.join(detectedOpenRouterHome, "config.toml"))
+    .readFileString(path.join(detectedOpenRouterHome, `${detectedOpenRouterProfile}.config.toml`))
     .pipe(
       Effect.map(isOpenRouterCodexConfig),
       Effect.catch(() => Effect.succeed(false)),
-      Effect.map((hasValidatedOpenRouterHome): ServerSettings =>
-        hasValidatedOpenRouterHome
-          ? {
-              ...DEFAULT_SERVER_SETTINGS,
-              textGenerationModelSelection: {
-                provider: "codex",
-                model: OPENROUTER_CODEX_DEFAULT_MODEL,
-              },
-              providers: {
-                ...DEFAULT_SERVER_SETTINGS.providers,
-                codex: {
-                  ...DEFAULT_SERVER_SETTINGS.providers.codex,
-                  homePath: detectedOpenRouterHome,
-                  customModels: [...OPENROUTER_CODEX_MODELS],
+      Effect.map(
+        (hasValidatedOpenRouterHome): ServerSettings =>
+          hasValidatedOpenRouterHome
+            ? {
+                ...DEFAULT_SERVER_SETTINGS,
+                textGenerationModelSelection: {
+                  provider: "codex",
+                  model: OPENROUTER_CODEX_DEFAULT_MODEL,
                 },
-              },
-            }
-          : DEFAULT_SERVER_SETTINGS,
+                providers: {
+                  ...DEFAULT_SERVER_SETTINGS.providers,
+                  codex: {
+                    ...DEFAULT_SERVER_SETTINGS.providers.codex,
+                    homePath: detectedOpenRouterHome,
+                    profile: detectedOpenRouterProfile,
+                    customModels: [...OPENROUTER_CODEX_MODELS],
+                  },
+                },
+              }
+            : DEFAULT_SERVER_SETTINGS,
       ),
     );
 
@@ -399,16 +403,32 @@ const makeServerSettings = Effect.gen(function* () {
     );
     const migratedSettings = migrateSettings(decoded.value, decoded.migrationVersion);
     const detectedDefaults = yield* defaultSettings;
+    const hasDetectedOpenRouterProfile =
+      detectedDefaults.providers.codex.profile === detectedOpenRouterProfile;
+    const migratedCodexHome = migratedSettings.providers.codex.homePath.trim();
+    const migratedCodexProfile = migratedSettings.providers.codex.profile.trim();
     const shouldAdoptOpenRouterHome =
-      migratedSettings.providers.codex.homePath.trim().length === 0 &&
-      detectedDefaults.providers.codex.homePath.trim().length > 0;
+      hasDetectedOpenRouterProfile &&
+      migratedCodexProfile.length === 0 &&
+      (migratedCodexHome.length === 0 || migratedCodexHome === legacyOpenRouterHome);
     const effectiveCodexHome = shouldAdoptOpenRouterHome
       ? detectedDefaults.providers.codex.homePath
-      : migratedSettings.providers.codex.homePath.trim();
+      : migratedCodexHome;
+    const effectiveCodexProfile = shouldAdoptOpenRouterHome
+      ? detectedOpenRouterProfile
+      : migratedCodexProfile;
     const hasValidatedOpenRouterProfile = effectiveCodexHome
       ? yield* fs
-          .readFileString(path.join(effectiveCodexHome, "config.toml"))
-          .pipe(Effect.map(isOpenRouterCodexConfig), Effect.catch(() => Effect.succeed(false)))
+          .readFileString(
+            path.join(
+              effectiveCodexHome,
+              effectiveCodexProfile ? `${effectiveCodexProfile}.config.toml` : "config.toml",
+            ),
+          )
+          .pipe(
+            Effect.map(isOpenRouterCodexConfig),
+            Effect.catch(() => Effect.succeed(false)),
+          )
       : false;
     const settingsWithDetectedOpenRouter = hasValidatedOpenRouterProfile
       ? {
@@ -426,6 +446,7 @@ const makeServerSettings = Effect.gen(function* () {
             codex: {
               ...migratedSettings.providers.codex,
               homePath: effectiveCodexHome,
+              profile: effectiveCodexProfile,
               customModels:
                 migratedSettings.providers.codex.customModels.length > 0
                   ? migratedSettings.providers.codex.customModels
@@ -440,6 +461,8 @@ const makeServerSettings = Effect.gen(function* () {
         migratedSettings.textGenerationModelSelection.model ||
         settingsWithDetectedOpenRouter.providers.codex.homePath !==
           migratedSettings.providers.codex.homePath ||
+        settingsWithDetectedOpenRouter.providers.codex.profile !==
+          migratedSettings.providers.codex.profile ||
         (migratedSettings.providers.codex.customModels.length === 0 &&
           settingsWithDetectedOpenRouter.providers.codex.customModels.length > 0));
     return {

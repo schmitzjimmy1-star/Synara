@@ -405,6 +405,37 @@ describe("composerDraftStore modelSelection", () => {
     expect(state.selectedModel).toBe("openai/gpt-5.4");
   });
 
+  it("drops a native Codex selection when the live catalog is provider-qualified", () => {
+    const state = deriveEffectiveComposerModelState({
+      draft: {
+        modelSelectionByProvider: {},
+        activeProvider: "codex",
+      },
+      selectedProvider: "codex",
+      threadModelSelection: modelSelection("codex", "gpt-5.5"),
+      projectModelSelection: null,
+      customModelsByProvider: {
+        codex: [],
+        claudeAgent: [],
+        cursor: [],
+        antigravity: [],
+        grok: [],
+        droid: [],
+        kilo: [],
+        opencode: [],
+        pi: [],
+      },
+      availableModelOptionsByProvider: {
+        codex: [
+          { slug: "openai/gpt-5.6-sol", name: "GPT-5.6 Sol" },
+          { slug: "anthropic/claude-sonnet-5", name: "Claude Sonnet 5" },
+        ],
+      },
+    });
+
+    expect(state.selectedModel).toBe("openai/gpt-5.6-sol");
+  });
+
   it("falls back to the first exposed OpenCode runtime model when the draft selection is stale", () => {
     const state = deriveEffectiveComposerModelState({
       draft: {

@@ -6,6 +6,7 @@
 
 import * as fs from "node:fs/promises";
 import path from "node:path";
+import { parse as parseToml, stringify as stringifyToml, type TomlTable } from "smol-toml";
 
 import { readActiveCodexProviderEnvKey } from "@synara/shared/codexConfig";
 import {
@@ -22,133 +23,36 @@ import {
 
 const CODEX_PROCESS_SHELL_ENV_NAMES = ["PATH", "SSH_AUTH_SOCK"] as const;
 const CODEX_OVERLAY_SHARED_STATE_FILES = new Set(["auth.json"]);
-const SYNARA_CONFIG_SUPPRESSIONS_FILE = "synara-config-suppressions-v1.json";
 const SYNARA_MANAGED_MCP_TABLE_HEADER = "[mcp_servers.synara]";
-export const SYNARA_COMPETING_BROWSER_PLUGIN_SECTION_HEADERS = [
-  '[plugins."browser@openai-bundled"]',
-  '[plugins."chrome@openai-bundled"]',
-  '[plugins."computer-use@openai-bundled"]',
-] as const;
-const MAX_CONFIG_SUPPRESSION_SECTIONS = 32;
-const MAX_CONFIG_SUPPRESSION_HEADER_LENGTH = 256;
 const codexOverlayPreparationQueues = new Map<string, Promise<void>>();
-// Retired local browser integrations used a stable six-character namespace.
-// Match the structural conflict without retaining any previous product name.
-const CONFLICTING_LOCAL_BROWSER_PLUGIN_SECTION_PATTERN =
-  /^\[plugins\."[a-z0-9][a-z0-9-]{5}-browser@local"\]$/;
+
+function isTomlTable(value: unknown): value is TomlTable {
+  return (
+    typeof value === "object" && value !== null && !Array.isArray(value) && !(value instanceof Date)
+  );
+}
+
+function mergeTomlTables(base: TomlTable, overlay: TomlTable): TomlTable {
+  const merged: TomlTable = { ...base };
+  for (const [key, overlayValue] of Object.entries(overlay)) {
+    const baseValue = merged[key];
+    merged[key] =
+      isTomlTable(baseValue) && isTomlTable(overlayValue)
+        ? mergeTomlTables(baseValue, overlayValue)
+        : overlayValue;
+  }
+  return merged;
+}
+
+export function applyCodexProfileLayer(baseConfig: string, profileConfig: string): string {
+  const base = baseConfig.trim() ? parseToml(baseConfig) : {};
+  const profile = profileConfig.trim() ? parseToml(profileConfig) : {};
+  return stringifyToml(mergeTomlTables(base, profile)).trimEnd();
+}
 
 interface CodexOverlayEntryLinker {
   readonly symlink: typeof fs.symlink;
   readonly copyFile: typeof fs.copyFile;
-}
-
-function isSafePluginSectionHeader(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    value.length <= MAX_CONFIG_SUPPRESSION_HEADER_LENGTH &&
-    /^\[plugins\."[^"\r\n]+"\]$/.test(value)
-  );
-}
-
-export async function readSynaraConfigSuppressions(markerPath: string): Promise<readonly string[]> {
-  try {
-    const parsed = JSON.parse(await fs.readFile(markerPath, "utf8")) as unknown;
-    if (typeof parsed !== "object" || parsed === null) return [];
-    const marker = parsed as { version?: unknown; sectionHeaders?: unknown };
-    if (marker.version !== 1 || !Array.isArray(marker.sectionHeaders)) return [];
-    if (marker.sectionHeaders.length > MAX_CONFIG_SUPPRESSION_SECTIONS) return [];
-    return [...new Set(marker.sectionHeaders.filter(isSafePluginSectionHeader))];
-  } catch {
-    return [];
-  }
-}
-
-function findConflictingLocalBrowserPluginSections(config: string): readonly string[] {
-  return [
-    ...new Set(
-      config
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter((line) => CONFLICTING_LOCAL_BROWSER_PLUGIN_SECTION_PATTERN.test(line)),
-    ),
-  ];
-}
-
-export function disableCodexConfigSections(
-  config: string,
-  sectionHeaders: readonly string[],
-  appendMissing = false,
-): string {
-  const targetsByName = new Map<string, string>();
-  for (const header of sectionHeaders) {
-    if (!isSafePluginSectionHeader(header)) continue;
-    const tableName = normalizeTomlTableHeaderName(header);
-    if (tableName !== undefined && !targetsByName.has(tableName)) {
-      targetsByName.set(tableName, header);
-    }
-  }
-  const lines = config.split(/\r?\n/);
-  const output: string[] = [];
-  let inTargetSection = false;
-  const seenTargetSections = new Set<string>();
-  let targetSectionHasEnabled = false;
-
-  const closeTargetSection = () => {
-    if (inTargetSection && !targetSectionHasEnabled) {
-      output.push("enabled = false");
-    }
-  };
-
-  for (const line of lines) {
-    const tableName = normalizeTomlTableHeaderName(line);
-    if (tableName !== undefined) {
-      closeTargetSection();
-      inTargetSection = targetsByName.has(tableName);
-      if (inTargetSection) seenTargetSections.add(tableName);
-      targetSectionHasEnabled = false;
-      output.push(line);
-      continue;
-    }
-
-    if (inTargetSection && /^\s*enabled\s*=/.test(line)) {
-      output.push("enabled = false");
-      targetSectionHasEnabled = true;
-      continue;
-    }
-
-    output.push(line);
-  }
-
-  closeTargetSection();
-
-  if (appendMissing) {
-    for (const [tableName, header] of targetsByName) {
-      if (seenTargetSections.has(tableName)) continue;
-      if (output.length > 0 && output.at(-1)?.trim()) {
-        output.push("");
-      }
-      output.push(header, "enabled = false");
-    }
-  }
-
-  return output.join("\n");
-}
-
-async function writeSynaraConfigSuppressions(
-  markerPath: string,
-  sectionHeaders: readonly string[],
-): Promise<void> {
-  const normalized = [...new Set(sectionHeaders.filter(isSafePluginSectionHeader))].slice(
-    0,
-    MAX_CONFIG_SUPPRESSION_SECTIONS,
-  );
-  const temporaryPath = `${markerPath}.${process.pid}.tmp`;
-  await fs.writeFile(
-    temporaryPath,
-    `${JSON.stringify({ version: 1, sectionHeaders: normalized }, null, 2)}\n`,
-    { encoding: "utf8", mode: 0o600 },
-  );
-  await fs.rename(temporaryPath, markerPath);
 }
 
 export async function linkOrCopyCodexOverlayEntry(
@@ -607,6 +511,7 @@ async function serializeCodexOverlayPreparation<A>(
 async function prepareSynaraCodexHomeOverlayUnlocked(input: {
   readonly env: NodeJS.ProcessEnv;
   readonly homePath?: string;
+  readonly profile?: string;
   readonly appendConfigToml?: string;
 }): Promise<string | undefined> {
   const sourceHomePath = resolveBaseCodexHomePath(input.env, input.homePath);
@@ -646,16 +551,20 @@ async function prepareSynaraCodexHomeOverlayUnlocked(input: {
     }
     throw cause;
   });
-  const suppressionMarkerPath = path.join(overlayHomePath, SYNARA_CONFIG_SUPPRESSIONS_FILE);
-  const suppressedSections = [
-    ...new Set([
-      ...SYNARA_COMPETING_BROWSER_PLUGIN_SECTION_HEADERS,
-      ...findConflictingLocalBrowserPluginSections(sourceConfig),
-      ...(await readSynaraConfigSuppressions(suppressionMarkerPath)),
-    ]),
-  ].slice(0, MAX_CONFIG_SUPPRESSION_SECTIONS);
+  const normalizedProfile = input.profile?.trim();
+  if (normalizedProfile && !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(normalizedProfile)) {
+    throw new Error(
+      "Invalid Codex profile name. Use only letters, numbers, underscores, and hyphens.",
+    );
+  }
+  const profileConfig = normalizedProfile
+    ? await fs.readFile(path.join(sourceHomePath, `${normalizedProfile}.config.toml`), "utf8")
+    : "";
+  const layeredConfig = normalizedProfile
+    ? applyCodexProfileLayer(sourceConfig, profileConfig)
+    : sourceConfig;
   const overlayConfigPath = path.join(overlayHomePath, "config.toml");
-  let overlayConfig = disableCodexConfigSections(sourceConfig, suppressedSections, true);
+  let overlayConfig = layeredConfig;
   const managedSection =
     input.appendConfigToml ??
     (await fs
@@ -675,7 +584,6 @@ async function prepareSynaraCodexHomeOverlayUnlocked(input: {
     }
   }
   await fs.writeFile(overlayConfigPath, overlayConfig, "utf8");
-  await writeSynaraConfigSuppressions(suppressionMarkerPath, suppressedSections);
 
   return overlayHomePath;
 }
@@ -683,6 +591,7 @@ async function prepareSynaraCodexHomeOverlayUnlocked(input: {
 async function prepareSynaraCodexHomeOverlay(input: {
   readonly env: NodeJS.ProcessEnv;
   readonly homePath?: string;
+  readonly profile?: string;
   readonly appendConfigToml?: string;
 }): Promise<string | undefined> {
   const sourceHomePath = resolveBaseCodexHomePath(input.env, input.homePath);
@@ -699,6 +608,7 @@ export async function buildCodexProcessEnv(
   input: {
     readonly env?: NodeJS.ProcessEnv;
     readonly homePath?: string;
+    readonly profile?: string;
     readonly platform?: NodeJS.Platform;
     readonly readEnvironment?: ShellEnvironmentReader;
     readonly appendConfigToml?: string;
@@ -708,6 +618,7 @@ export async function buildCodexProcessEnv(
   const overlayHomePath = await prepareSynaraCodexHomeOverlay({
     env: baseEnv,
     ...(input.homePath ? { homePath: input.homePath } : {}),
+    ...(input.profile ? { profile: input.profile } : {}),
     ...(input.appendConfigToml ? { appendConfigToml: input.appendConfigToml } : {}),
   });
   const configuredEnv =

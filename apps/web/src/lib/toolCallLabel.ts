@@ -4,12 +4,7 @@
 // Exports: deriveReadableToolTitle, deriveReadableCommandDisplay, deriveFriendlyCommandTarget, command icon classifiers, deriveInlineCommandCall, normalizeCompactToolLabel, isGenericToolTitle, extractWebFetchUrl
 // Depends on: @synara/contracts tool lifecycle item types
 
-import {
-  BROWSER_TOOL_NAMES,
-  type BrowserToolName,
-  type ToolLifecycleItemType,
-} from "@synara/contracts";
-import { BROWSER_TOOL_TITLES } from "@synara/shared/browserAutomationPresentation";
+import { type ToolLifecycleItemType } from "@synara/contracts";
 import { basenameOfPath } from "../file-icons";
 import { extractToolArgumentField } from "./toolArgumentSummary";
 
@@ -118,16 +113,6 @@ interface SynaraMcpToolPresentation {
   readonly completed: string;
   readonly failed: string;
 }
-
-type SynaraBrowserToolName = `synara_${BrowserToolName}`;
-const BROWSER_TOOL_NAME_SET = new Set<string>(BROWSER_TOOL_NAMES);
-
-const SYNARA_BROWSER_TOOL_PRESENTATIONS = Object.fromEntries(
-  BROWSER_TOOL_NAMES.map((toolName) => {
-    const title = BROWSER_TOOL_TITLES[toolName];
-    return [`synara_${toolName}`, { running: title, completed: title, failed: title }];
-  }),
-) as Record<SynaraBrowserToolName, SynaraMcpToolPresentation>;
 
 const SYNARA_MCP_TOOL_PRESENTATIONS = {
   synara_context: {
@@ -270,7 +255,6 @@ const SYNARA_MCP_TOOL_PRESENTATIONS = {
     completed: "Synara stopped an automation",
     failed: "Synara couldn't stop an automation",
   },
-  ...SYNARA_BROWSER_TOOL_PRESENTATIONS,
 } as const satisfies Record<string, SynaraMcpToolPresentation>;
 
 function normalizeSynaraMcpIdentifier(value: string): string {
@@ -279,13 +263,6 @@ function normalizeSynaraMcpIdentifier(value: string): string {
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
 }
-
-const SYNARA_BROWSER_TOOL_NAME_BY_PRESENTATION = new Map<string, SynaraBrowserToolName>(
-  BROWSER_TOOL_NAMES.map((toolName) => [
-    normalizeSynaraMcpIdentifier(BROWSER_TOOL_TITLES[toolName]),
-    `synara_${toolName}`,
-  ]),
-);
 
 const SYNARA_MCP_TOOL_PRESENTATION_ENTRIES = Object.entries(SYNARA_MCP_TOOL_PRESENTATIONS).map(
   ([toolName, presentation]) => ({
@@ -298,9 +275,6 @@ const SYNARA_MCP_TOOL_PRESENTATION_ENTRIES = Object.entries(SYNARA_MCP_TOOL_PRES
 );
 
 function extractSynaraMcpToolName(normalizedCandidate: string): string | null {
-  if (BROWSER_TOOL_NAME_SET.has(normalizedCandidate)) {
-    return `synara_${normalizedCandidate}`;
-  }
   if (normalizedCandidate.startsWith("mcp_synara_synara_")) {
     return normalizedCandidate.slice("mcp_synara_".length);
   }
@@ -312,24 +286,6 @@ function extractSynaraMcpToolName(normalizedCandidate: string): string | null {
   }
   if (normalizedCandidate.startsWith("synara_")) {
     return normalizedCandidate;
-  }
-  return null;
-}
-
-function resolveSynaraBrowserToolName(
-  candidates: ReadonlyArray<string | null | undefined>,
-): SynaraBrowserToolName | null {
-  for (const candidate of candidates) {
-    if (!candidate) continue;
-    const normalizedCandidate = normalizeSynaraMcpIdentifier(candidate);
-    const extractedToolName = extractSynaraMcpToolName(normalizedCandidate);
-    const candidateToolName =
-      extractedToolName ??
-      SYNARA_BROWSER_TOOL_NAME_BY_PRESENTATION.get(normalizedCandidate) ??
-      normalizedCandidate;
-    if (candidateToolName in SYNARA_BROWSER_TOOL_PRESENTATIONS) {
-      return candidateToolName as SynaraBrowserToolName;
-    }
   }
   return null;
 }
@@ -409,10 +365,6 @@ export interface SynaraMcpToolTitleInput {
   readonly title?: string | null | undefined;
   readonly fallbackLabel?: string | null | undefined;
   readonly status?: SynaraMcpToolStatus | undefined;
-}
-
-export function isSynaraBrowserToolCall(input: SynaraMcpToolTitleInput): boolean {
-  return resolveSynaraBrowserToolName([input.toolName, input.title, input.fallbackLabel]) !== null;
 }
 
 // Every provider exposes Synara's MCP tools differently: MCP, dynamic, and even

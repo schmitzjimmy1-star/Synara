@@ -14,7 +14,6 @@ import {
 import type { ProjectionSnapshotQueryShape } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import type { ProjectionTurnRepositoryShape } from "../persistence/Services/ProjectionTurns.ts";
 import type { ProviderDiscoveryServiceShape } from "../provider/Services/ProviderDiscoveryService.ts";
-import { SYNARA_HARNESS_POLICY_VERSION } from "./harnessPolicy.ts";
 import { mcpToolResultError, mcpToolResultJson } from "./protocol.ts";
 import {
   AGENT_GATEWAY_TARGET_OPTIONS_DESCRIPTION,
@@ -29,6 +28,7 @@ import {
   summarizeWaitThreadText,
   WAIT_THREAD_SUMMARY_MAX_CHARS,
 } from "./threadSummary.ts";
+
 import {
   decodeWaitForThreadsInput,
   errorText,
@@ -46,6 +46,7 @@ import {
   type ToolEntry,
 } from "./toolRuntime.ts";
 
+const SYNARA_GATEWAY_POLICY_VERSION = "retired";
 const LIST_THREADS_DEFAULT_LIMIT = 50;
 const LIST_THREADS_MAX_LIMIT = 200;
 
@@ -94,7 +95,7 @@ export function makeThreadReadTools(input: ThreadReadToolsInput): ReadonlyArray<
         const caller = yield* requireThreadShell(context.callerThreadId);
         const turnId = caller.latestTurn?.state === "running" ? caller.latestTurn.turnId : null;
         return mcpToolResultJson({
-          harness: { name: "Synara", policyVersion: SYNARA_HARNESS_POLICY_VERSION },
+          harness: { name: "Synara", policyVersion: SYNARA_GATEWAY_POLICY_VERSION },
           caller: {
             threadId: caller.id,
             turnId,

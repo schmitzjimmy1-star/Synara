@@ -95,7 +95,6 @@ import { ProjectionStateIncompleteError } from "./persistence/Errors";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
 import { shouldPublishThreadShellForEvent } from "./orchestration/threadShellEvents";
 import { ProviderDiscoveryService } from "./provider/Services/ProviderDiscoveryService";
-import { discoverSkillsCatalog, synaraSkillsDir } from "./provider/skillsCatalog";
 import { recoverUnregisteredGitHubCheckout } from "./project/githubProjectRegistration";
 import { ProviderAdapterRegistry } from "./provider/Services/ProviderAdapterRegistry";
 import { ProviderHealth } from "./provider/Services/ProviderHealth";
@@ -1903,19 +1902,9 @@ const makeWsRpcHandlersLayer = () =>
           rpcEffect(providerDiscoveryService.listSkills(input), "Failed to list skills"),
         [WS_METHODS.providerListSkillsCatalog]: (input) =>
           rpcEffect(
-            Effect.tryPromise(() =>
-              discoverSkillsCatalog({
-                cwd: input.cwd ?? null,
-                homeDir: config.homeDir,
-                synaraBaseDir: config.baseDir,
-                includeDuplicateOrigins: true,
-              }),
-            ).pipe(
-              Effect.map((skills) => ({
-                skills,
-                synaraSkillsDir: synaraSkillsDir(config.baseDir),
-              })),
-            ),
+            providerDiscoveryService
+              .listSkills({ provider: "codex", cwd: input.cwd ?? config.homeDir })
+              .pipe(Effect.map(({ skills }) => ({ skills }))),
             "Failed to list the skills catalog",
           ),
         [WS_METHODS.providerListPlugins]: (input) =>

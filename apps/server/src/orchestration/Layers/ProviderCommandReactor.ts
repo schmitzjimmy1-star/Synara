@@ -53,7 +53,6 @@ import {
   resolveTailUserMessageEditTarget,
 } from "@synara/shared/conversationEdit";
 import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@synara/shared/git";
-import { claudeSelectionRequiresRestart } from "@synara/shared/model";
 import { providerSupportsNativeTurnSteering } from "@synara/shared/providerMetadata";
 import {
   formatProviderDeliveryBlockDetail,
@@ -1284,22 +1283,11 @@ const make = Effect.gen(function* () {
         requestedModelSelection.model !== activeSessionBeforeEnsure?.model;
       const shouldRestartForModelChange = modelChanged && sessionModelSwitch === "restart-session";
       const previousModelSelection = threadSessionModelSelections.get(threadId);
-      // Claude restarts resume via `--resume`, which replays the whole conversation
-      // as uncached input tokens. Only spawn-fixed options (currently `max` effort)
-      // may force that; model and context-window changes switch in-session via
-      // setModel, and effort/fastMode/ultracode/thinking apply via flag settings.
-      // When the dispatch cache has no entry (the session was started by a turn
-      // without a selection), compare against the projected thread selection the
-      // session was actually spawned from so spawn-fixed changes still restart.
       const shouldRestartForModelSelectionChange =
         requestedModelSelection !== undefined &&
-        (currentProvider === "claudeAgent"
-          ? claudeSelectionRequiresRestart(
-              previousModelSelection ?? thread.modelSelection,
-              requestedModelSelection,
-            )
-          : (currentProvider === "droid" || currentProvider === "grok") &&
-            !Equal.equals(previousModelSelection, requestedModelSelection));
+        previousModelSelection !== undefined &&
+        !Equal.equals(previousModelSelection, requestedModelSelection) &&
+        sessionModelSwitch === "restart-session";
 
       if (
         !runtimeModeChanged &&
@@ -1332,14 +1320,6 @@ const make = Effect.gen(function* () {
         hasResumeCursor: resumeCursor !== undefined,
       });
       const restartedSession = yield* startProviderSession(resumeCursor);
-      if (
-        shouldRegisterContextBootstrap &&
-        currentProvider === "droid" &&
-        !providerChanged &&
-        resumeCursor === undefined
-      ) {
-        freshSessionContextBootstrapThreadIds.add(threadId);
-      }
       threadSessionModelSelections.set(threadId, desiredModelSelection);
       yield* Effect.logInfo("provider command reactor restarted provider session", {
         threadId,
@@ -1362,15 +1342,6 @@ const make = Effect.gen(function* () {
         sourceThreadId: thread.forkSourceThreadId,
       });
       if (forked) {
-        if (
-          shouldRegisterContextBootstrap &&
-          preferredProvider === "droid" &&
-          thread.sidechatSourceThreadId
-        ) {
-          // Droid's ACP fork preserves the native session but does not guarantee
-          // that the imported sidechat transcript is model-visible on its first prompt.
-          sidechatContextBootstrapThreadIds.add(threadId);
-        }
         threadSessionModelSelections.set(threadId, desiredModelSelection);
         const forkedSession =
           (yield* resolveActiveSession(threadId)) ??

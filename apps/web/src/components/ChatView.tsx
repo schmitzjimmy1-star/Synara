@@ -5269,7 +5269,6 @@ export default function ChatView({
     [
       activeThreadId,
       dismissTranscriptSelectionAction,
-      isPendingSetupBubbleId,
       pendingTranscriptSelectionAction,
       threadMarkers,
       timelineMessages,

@@ -47,10 +47,9 @@ export function makeDeviceServiceLayer(options: DeviceServiceLiveOptions = {}) {
       const supported = options.enabled !== false && platform === "darwin";
       const backend = new IosSimulatorBackend({ platform: supported ? platform : "linux" });
       // Only darwin can boot anything, so only darwin needs to remember doing so.
-      const bootOwnership =
-        supported
-          ? makeBootOwnershipStore(options.bootOwnershipPath ?? defaultBootOwnershipPath())
-          : NULL_BOOT_OWNERSHIP;
+      const bootOwnership = supported
+        ? makeBootOwnershipStore(options.bootOwnershipPath ?? defaultBootOwnershipPath())
+        : NULL_BOOT_OWNERSHIP;
       const manager = new DeviceManager({ backend, bootOwnership });
 
       // A previous run that crashed left its simulators booted and no longer

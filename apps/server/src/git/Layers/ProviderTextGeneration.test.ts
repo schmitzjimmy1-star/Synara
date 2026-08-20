@@ -28,7 +28,6 @@ function makeTestLayer() {
         taskPrompt: null,
         schedule: null,
         mode: null,
-        completionPolicy: null,
         missingFields: [],
         needsConfirmation: false,
         reason: null,

@@ -212,11 +212,6 @@ import {
   sendBrowserCopyLink,
   sendBrowserState,
 } from "./browserIpc";
-import {
-  BrowserHostPipeServer,
-  SYNARA_BROWSER_HOST_PIPE_PATH,
-  resolveBrowserHostPipeBackendEnv,
-} from "./browserUsePipeServer";
 import { normalizeDesktopWsUrl, resolveDesktopWsUrlFromEnv } from "./desktopWsBridge";
 import {
   repairBrowserProfileFromBridgeManifest,
@@ -298,8 +293,6 @@ const LOG_FILE_MAX_BYTES = 10 * 1024 * 1024;
 const LOG_FILE_MAX_FILES = 10;
 const APP_RUN_ID = Crypto.randomBytes(6).toString("hex");
 const DESKTOP_BACKEND_SHUTDOWN_TOKEN = Crypto.randomBytes(32).toString("hex");
-const DESKTOP_BROWSER_HOST_CAPABILITY = Crypto.randomBytes(32).toString("base64url");
-const DESKTOP_BROWSER_HOST_CAPABILITY_FD = 3;
 // Electron's single-instance lock is scoped through userData on Windows/Linux.
 // Set the flavor-specific profile first so Stable, Dev, and Canary never contend
 // for the same lock even when they use the same Electron executable.
@@ -406,7 +399,6 @@ const browserManager = new DesktopBrowserManager({
     return target ? handleDesktopPhysicalZoomShortcut(event, input, target) : false;
   },
 });
-let browserHostPipeServer: BrowserHostPipeServer | null = null;
 let appSnapManager: DesktopAppSnapManager | null = null;
 let configuredUpdaterCacheDirName: string | null = null;
 
@@ -448,21 +440,6 @@ function startBrowserPerformanceLogging(): void {
     });
   }, BROWSER_PERF_SAMPLE_INTERVAL_MS);
   browserPerfInterval.unref();
-}
-
-async function ensureBrowserHostPipeServer(): Promise<void> {
-  if (browserHostPipeServer || !SYNARA_BROWSER_HOST_PIPE_PATH) {
-    return;
-  }
-  const server = new BrowserHostPipeServer(browserManager, {
-    capability: DESKTOP_BROWSER_HOST_CAPABILITY,
-    requestOpenPanel: (threadId) => {
-      if (!threadId) return;
-      mainWindow?.webContents.send(IPC.browser.requestOpenPanel, { threadId });
-    },
-  });
-  await server.start();
-  browserHostPipeServer = server;
 }
 
 let destructiveMenuIconCache: Electron.NativeImage | null | undefined;
@@ -3423,11 +3400,7 @@ function backendNodeArgs(): string[] {
 function backendEnv(): NodeJS.ProcessEnv {
   const servedStaticRoot = resolveServedStaticRoot();
   const env: NodeJS.ProcessEnv = {
-    ...resolveBrowserHostPipeBackendEnv(
-      process.env,
-      browserHostPipeServer ? SYNARA_BROWSER_HOST_PIPE_PATH : null,
-      browserHostPipeServer ? DESKTOP_BROWSER_HOST_CAPABILITY_FD : null,
-    ),
+    ...process.env,
     // Point the backend's HTTP static route at the same swap-immune snapshot the
     // synara:// protocol serves, so both surfaces survive app.asar being replaced.
     ...(servedStaticRoot?.snapshotted ? { SYNARA_STATIC_DIR: servedStaticRoot.dir } : {}),
@@ -3689,23 +3662,9 @@ function startBackend(trigger: BackendStartTrigger = "lifecycle"): void {
       SYNARA_SERVER_ENTRY: backendEntry,
     },
     // Keep output piped in every environment so startup blockers and readiness
-    // are observable even when packaged log setup is unavailable. The fourth
-    // pipe carries the browser-host capability and must never be inherited.
-    stdio: ["ignore", "pipe", "pipe", "pipe"],
+    // are observable even when packaged log setup is unavailable.
+    stdio: ["ignore", "pipe", "pipe"],
   });
-  const capabilityPipe = child.stdio[DESKTOP_BROWSER_HOST_CAPABILITY_FD];
-  if (capabilityPipe && "end" in capabilityPipe) {
-    capabilityPipe.on("error", (error) => {
-      if (!isBrokenPipeError(error)) {
-        safeConsoleError("[desktop] failed to deliver browser host capability", error);
-      }
-    });
-    capabilityPipe.end(DESKTOP_BROWSER_HOST_CAPABILITY);
-  } else {
-    child.kill();
-    scheduleBackendRestart("browser host capability pipe was unavailable");
-    return;
-  }
   const listeningDetector = new ServerListeningDetector();
   const startupBlockDetector = new BackendStartupBlockDetector();
   const outputTailDetector = new BackendOutputTailDetector();
@@ -3853,20 +3812,6 @@ async function stopBackendAndWaitForExit(timeoutMs = BACKEND_SHUTDOWN_TIMEOUT_MS
   }
 }
 
-async function disposeBrowserHostPipeServerForShutdown(reason: string): Promise<void> {
-  const pipeServer = browserHostPipeServer;
-  browserHostPipeServer = null;
-  if (!pipeServer) return;
-
-  try {
-    await pipeServer.dispose();
-  } catch (error: unknown) {
-    const message = formatErrorMessage(error);
-    writeDesktopLogHeader(`${reason} browser host pipe dispose failed message=${message}`);
-    console.warn(`[desktop] Failed to dispose browser host pipe during ${reason}: ${message}`);
-  }
-}
-
 // Keeps Electron alive long enough for backend finalizers to reap provider child processes.
 async function shutdownDesktopRuntime(reason: string): Promise<void> {
   if (desktopShutdownPromise) {
@@ -3884,7 +3829,6 @@ async function shutdownDesktopRuntime(reason: string): Promise<void> {
       cancelBackendReadinessWait();
       appSnapManager?.dispose();
       appSnapManager = null;
-      await disposeBrowserHostPipeServerForShutdown(reason);
       browserManager.dispose();
       restoreStdIoCapture?.();
       desktopShutdownComplete = true;
@@ -4746,11 +4690,6 @@ async function bootstrap(): Promise<void> {
 
   registerIpcHandlers();
   writeDesktopLogHeader("bootstrap ipc handlers registered");
-  try {
-    await ensureBrowserHostPipeServer();
-  } catch (error) {
-    console.warn("[Synara browser] Failed to start browser host pipe", error);
-  }
   startBackend();
   writeDesktopLogHeader("bootstrap backend start requested");
 

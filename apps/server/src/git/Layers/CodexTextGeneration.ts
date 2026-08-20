@@ -177,6 +177,7 @@ const makeCodexTextGeneration = Effect.gen(function* () {
   const prepareIsolatedCodexHome = (
     operation: TextGenerationOperation,
     sourceHomePath?: string,
+    profile?: string,
   ): Effect.Effect<{ readonly homePath: string }, TextGenerationError> =>
     Effect.gen(function* () {
       const sourceCodexHome = sourceHomePath?.trim() || resolveCodexHome(process.env);
@@ -211,6 +212,35 @@ const makeCodexTextGeneration = Effect.gen(function* () {
                 new TextGenerationError({
                   operation,
                   detail: "Failed to copy Codex config for isolated text generation.",
+                  cause,
+                }),
+            ),
+          );
+      }
+
+      const normalizedProfile = profile?.trim();
+      if (normalizedProfile) {
+        const profileFileName = `${normalizedProfile}.config.toml`;
+        const sourceProfile = yield* fileSystem
+          .readFileString(path.join(sourceCodexHome, profileFileName))
+          .pipe(Effect.catch(() => Effect.succeed(null)));
+        if (sourceProfile === null) {
+          return yield* new TextGenerationError({
+            operation,
+            detail: `Codex profile '${normalizedProfile}' was not found in ${sourceCodexHome}.`,
+          });
+        }
+        yield* fileSystem
+          .writeFileString(
+            path.join(isolatedHomePath, profileFileName),
+            sanitizeCodexConfigForTextGeneration(sourceProfile),
+          )
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new TextGenerationError({
+                  operation,
+                  detail: `Failed to copy Codex profile '${normalizedProfile}' for isolated text generation.`,
                   cause,
                 }),
             ),
@@ -297,13 +327,18 @@ const makeCodexTextGeneration = Effect.gen(function* () {
     Effect.gen(function* () {
       const codexBinaryPath = resolveCodexBinaryPath(providerOptions);
       const resolvedCodexHomePath = resolveCodexHomePath(codexHomePath, providerOptions);
+      const resolvedCodexProfile = resolveCodexProfile(providerOptions);
       const schemaPath = yield* writeTempFile(
         operation,
         "codex-schema",
         JSON.stringify(toJsonSchemaObject(outputSchemaJson)),
       );
       const outputPath = yield* writeTempFile(operation, "codex-output", "");
-      const isolatedCodexHome = yield* prepareIsolatedCodexHome(operation, resolvedCodexHomePath);
+      const isolatedCodexHome = yield* prepareIsolatedCodexHome(
+        operation,
+        resolvedCodexHomePath,
+        resolvedCodexProfile,
+      );
 
       const workingDirectoryExists = fileSystem.stat(cwd).pipe(
         Effect.map((cwdInfo) => cwdInfo.type === "Directory"),
@@ -324,6 +359,7 @@ const makeCodexTextGeneration = Effect.gen(function* () {
           buildCodexProcessEnv({ homePath: isolatedCodexHome.homePath }),
         );
         const args = [
+          ...(resolvedCodexProfile ? ["--profile", resolvedCodexProfile] : []),
           "exec",
           "--ephemeral",
           "--skip-git-repo-check",
@@ -684,6 +720,13 @@ function resolveCodexHomePath(
   providerOptions: BranchNameGenerationInput["providerOptions"] | undefined,
 ): string | undefined {
   const resolved = codexHomePath?.trim() || providerOptions?.codex?.homePath?.trim();
+  return resolved && resolved.length > 0 ? resolved : undefined;
+}
+
+function resolveCodexProfile(
+  providerOptions: BranchNameGenerationInput["providerOptions"] | undefined,
+): string | undefined {
+  const resolved = providerOptions?.codex?.profile?.trim();
   return resolved && resolved.length > 0 ? resolved : undefined;
 }
 

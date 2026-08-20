@@ -1,15 +1,6 @@
 export * from "./auth";
 export * from "./automation";
 export * from "./baseSchemas";
-export * from "./browserAutomationBounds";
-export * from "./browserAutomationIds";
-export * from "./browserAutomationErrors";
-export * from "./browserAutomationCssSelector";
-export * from "./browserAutomationTargets";
-export { BrowserLoadState } from "./browserAutomationToolCommon";
-export * from "./browserAutomationToolInputs";
-export * from "./browserAutomationToolOutputs";
-export * from "./browserAutomationToolCatalogue";
 export * from "./browserAnnotations";
 export * from "./ipc";
 export * from "./terminal";

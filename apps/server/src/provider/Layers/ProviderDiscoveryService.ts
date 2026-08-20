@@ -11,14 +11,13 @@ import {
   ProviderListSkillsInput,
   type ProviderListSkillsResult,
   ProviderReadPluginInput,
-  type ProviderSkillDescriptor,
 } from "@synara/contracts";
 import { isOpenRouterCodexConfig } from "@synara/shared/codexConfig";
 import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { Effect, Layer, Option, Schema, SchemaIssue } from "effect";
 
-import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderValidationError } from "../Errors.ts";
 import { ProviderAdapterRegistry } from "../Services/ProviderAdapterRegistry.ts";
@@ -26,11 +25,7 @@ import {
   ProviderDiscoveryService,
   type ProviderDiscoveryServiceShape,
 } from "../Services/ProviderDiscoveryService.ts";
-import {
-  discoverSkillsCatalog,
-  filterDisabledSkills,
-  mergeSkillsIntoCatalog,
-} from "../skillsCatalog.ts";
+import { filterDisabledSkills } from "../skillsCatalog.ts";
 
 const decodeInputOrValidationError = <S extends Schema.Top>(input: {
   readonly operation: string;
@@ -64,9 +59,11 @@ const disabledCapabilitiesForProvider = (
 
 const decodeProviderModelDescriptorOption = Schema.decodeUnknownOption(ProviderModelDescriptor);
 
-async function isValidatedOpenRouterHome(homePath: string): Promise<boolean> {
+async function isValidatedOpenRouterHome(homePath: string, profile: string): Promise<boolean> {
   try {
-    return isOpenRouterCodexConfig(await readFile(join(homePath, "config.toml"), "utf8"));
+    const resolvedHome = homePath || process.env.CODEX_HOME?.trim() || join(homedir(), ".codex");
+    const configName = profile ? `${profile}.config.toml` : "config.toml";
+    return isOpenRouterCodexConfig(await readFile(join(resolvedHome, configName), "utf8"));
   } catch {
     return false;
   }
@@ -96,9 +93,31 @@ function isolateMalformedModelDescriptors(input: {
   );
 }
 
+function configuredModelFallback(slug: string) {
+  const separatorIndex = slug.indexOf("/");
+  if (separatorIndex <= 0) {
+    return { slug, name: slug };
+  }
+  const upstreamProviderId = slug.slice(0, separatorIndex);
+  const upstreamProviderName =
+    upstreamProviderId === "openai"
+      ? "OpenAI"
+      : upstreamProviderId === "deepseek"
+        ? "DeepSeek"
+        : upstreamProviderId === "qwen"
+          ? "Qwen"
+          : `${upstreamProviderId.slice(0, 1).toUpperCase()}${upstreamProviderId.slice(1)}`;
+
+  return {
+    slug,
+    name: slug,
+    upstreamProviderId,
+    upstreamProviderName,
+  };
+}
+
 const make = Effect.gen(function* () {
   const registry = yield* ProviderAdapterRegistry;
-  const serverConfig = yield* ServerConfig;
   const serverSettings = yield* ServerSettingsService;
 
   const getComposerCapabilities: ProviderDiscoveryServiceShape["getComposerCapabilities"] = (
@@ -114,13 +133,7 @@ const make = Effect.gen(function* () {
       const capabilities = adapter.getComposerCapabilities
         ? yield* adapter.getComposerCapabilities()
         : disabledCapabilitiesForProvider(parsed.provider);
-      // The unified Synara skills catalog backs skill discovery for every
-      // provider, including ones without native skill support.
-      return {
-        ...capabilities,
-        supportsSkillMentions: true,
-        supportsSkillDiscovery: true,
-      };
+      return capabilities;
     });
 
   const listSkills: ProviderDiscoveryServiceShape["listSkills"] = (input) =>
@@ -131,45 +144,24 @@ const make = Effect.gen(function* () {
         payload: input,
       });
       const adapter = yield* registry.getByProvider(parsed.provider);
-      const nativeResult: ProviderListSkillsResult | null = adapter.listSkills
-        ? yield* adapter
-            .listSkills(parsed)
-            .pipe(
-              Effect.catch((error) =>
-                Effect.logWarning(
-                  "provider-native skill discovery failed; serving the Synara skills catalog only",
-                  { provider: parsed.provider, error },
-                ).pipe(Effect.as(null)),
+      const nativeResult: ProviderListSkillsResult = adapter.listSkills
+        ? yield* adapter.listSkills(parsed).pipe(
+            Effect.catch((error) =>
+              Effect.logWarning("provider-native skill discovery failed", {
+                provider: parsed.provider,
+                error,
+              }).pipe(
+                Effect.as({ skills: [], source: "provider.discovery.failed", cached: false }),
               ),
-            )
-        : null;
-      const catalogSkills = yield* Effect.tryPromise(() =>
-        discoverSkillsCatalog({
-          cwd: parsed.cwd,
-          homeDir: serverConfig.homeDir,
-          synaraBaseDir: serverConfig.baseDir,
-          provider: parsed.provider,
-          ...(parsed.forceReload !== undefined ? { forceReload: parsed.forceReload } : {}),
-        }),
-      ).pipe(
-        Effect.catchCause((cause) =>
-          Effect.logWarning("synara skills catalog discovery failed", {
-            provider: parsed.provider,
-            cause,
-          }).pipe(Effect.as([] as ProviderSkillDescriptor[])),
-        ),
-      );
-      const merged = mergeSkillsIntoCatalog({
-        native: nativeResult?.skills ?? [],
-        catalog: catalogSkills,
-      });
+            ),
+          )
+        : { skills: [], source: "unsupported", cached: false };
       const settings = yield* serverSettings.getSettings.pipe(
         Effect.orElseSucceed(() => DEFAULT_SERVER_SETTINGS),
       );
       return {
-        skills: filterDisabledSkills(merged, settings.skills.disabled),
-        source: nativeResult?.source ? `${nativeResult.source}+synara.catalog` : "synara.catalog",
-        cached: nativeResult?.cached ?? false,
+        ...nativeResult,
+        skills: filterDisabledSkills(nativeResult.skills, settings.skills.disabled),
       } satisfies ProviderListSkillsResult;
     });
 
@@ -266,6 +258,9 @@ const make = Effect.gen(function* () {
               ...(settings.providers.codex.homePath
                 ? { homePath: settings.providers.codex.homePath }
                 : {}),
+              ...(settings.providers.codex.profile
+                ? { profile: settings.providers.codex.profile }
+                : {}),
             }
           : parsed,
       );
@@ -274,19 +269,39 @@ const make = Effect.gen(function* () {
       const shouldCurateCodexModels =
         parsed.provider === "codex" &&
         settings !== null &&
-        settings.providers.codex.homePath.trim().length > 0 &&
+        (settings.providers.codex.homePath.trim().length > 0 ||
+          settings.providers.codex.profile.trim().length > 0) &&
         configuredModelSet.size > 0 &&
         (yield* Effect.promise(() =>
-          isValidatedOpenRouterHome(settings.providers.codex.homePath.trim()),
+          isValidatedOpenRouterHome(
+            settings.providers.codex.homePath.trim(),
+            settings.providers.codex.profile.trim(),
+          ),
         ));
-      const result =
-        shouldCurateCodexModels
-          ? {
+      const result = shouldCurateCodexModels
+        ? (() => {
+            const discoveredBySlug = new Map(
+              discovered.models.map((model) => [model.slug, model] as const),
+            );
+            return {
               ...discovered,
-              models: discovered.models.filter((model) => configuredModelSet.has(model.slug)),
+              // Codex's built-in model/list catalog does not necessarily know
+              // every slug accepted by a custom provider. The configured list
+              // is the OpenRouter allowlist and therefore the source of truth;
+              // preserve live capability metadata when Codex has it, then add
+              // a minimal descriptor for every configured provider/model slug.
+              models: configuredModels.map((slug) => {
+                const discoveredModel = discoveredBySlug.get(slug);
+                if (discoveredModel) {
+                  const decoded = decodeProviderModelDescriptorOption(discoveredModel);
+                  if (Option.isSome(decoded)) return decoded.value;
+                }
+                return configuredModelFallback(slug);
+              }),
               source: `${discovered.source ?? "codex"}+curated`,
-            }
-          : discovered;
+            };
+          })()
+        : discovered;
       return yield* isolateMalformedModelDescriptors({
         provider: parsed.provider,
         result,

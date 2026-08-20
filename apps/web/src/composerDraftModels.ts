@@ -687,8 +687,13 @@ export function deriveEffectiveComposerModelState(input: {
     Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>>
   >;
 }): EffectiveComposerModelState {
+  const selectedProviderOptions = input.availableModelOptionsByProvider?.[input.selectedProvider];
+  const usesProviderQualifiedCodexCatalog =
+    input.selectedProvider === "codex" &&
+    Boolean(selectedProviderOptions?.length) &&
+    selectedProviderOptions?.every((option) => option.slug.includes("/")) === true;
   const resolveAvailableModel = (candidate: string | null | undefined): ModelSlug | null => {
-    const availableOptions = input.availableModelOptionsByProvider?.[input.selectedProvider];
+    const availableOptions = selectedProviderOptions;
     if (!availableOptions || availableOptions.length === 0) {
       return null;
     }
@@ -705,11 +710,13 @@ export function deriveEffectiveComposerModelState(input: {
       getDefaultModel(input.selectedProvider),
   );
   const persistedThreadModel =
+    !usesProviderQualifiedCodexCatalog &&
     input.threadModelSelection?.provider === input.selectedProvider
       ? (normalizeModelSlug(input.threadModelSelection.model, input.selectedProvider) ??
         input.threadModelSelection.model)
       : null;
   const persistedProjectModel =
+    !usesProviderQualifiedCodexCatalog &&
     input.projectModelSelection?.provider === input.selectedProvider
       ? (normalizeModelSlug(input.projectModelSelection.model, input.selectedProvider) ??
         input.projectModelSelection.model)
@@ -739,7 +746,7 @@ export function deriveEffectiveComposerModelState(input: {
     persistedThreadModel ??
     persistedProjectModel ??
     unlistedDraftModel ??
-    input.availableModelOptionsByProvider?.[input.selectedProvider]?.[0]?.slug ??
+    selectedProviderOptions?.[0]?.slug ??
     selectedDraftModel ??
     baseModel ??
     getDefaultModel("codex");

@@ -4,13 +4,16 @@ import { DEFAULT_GIT_TEXT_GENERATION_MODEL } from "./model";
 import { ModelSelection, ProviderKind, ThreadEnvironmentMode } from "./orchestration";
 
 const StringSetting = TrimmedString.check(Schema.isMaxLength(4096));
+const CodexProfileSetting = TrimmedString.check(
+  Schema.isMaxLength(128),
+  Schema.isPattern(/^(?:[A-Za-z0-9][A-Za-z0-9_-]*)?$/),
+);
 const CustomModels = Schema.Array(Schema.String.check(Schema.isMaxLength(256))).pipe(
   Schema.withDecodingDefault(() => []),
 );
 export const OPENROUTER_CODEX_MODELS = [
   "openai/gpt-5.6-sol",
   "anthropic/claude-sonnet-5",
-  "anthropic/claude-haiku-4.5",
   "deepseek/deepseek-v4-pro",
   "deepseek/deepseek-v4-flash-0731",
   "qwen/qwen3.8-max",
@@ -27,6 +30,7 @@ export const CodexServerProviderSettings = Schema.Struct({
   ...ProviderSettingsBase,
   binaryPath: StringSetting.pipe(Schema.withDecodingDefault(() => "codex")),
   homePath: StringSetting.pipe(Schema.withDecodingDefault(() => "")),
+  profile: CodexProfileSetting.pipe(Schema.withDecodingDefault(() => "")),
   customModels: CustomModels,
 });
 export type CodexServerProviderSettings = typeof CodexServerProviderSettings.Type;
@@ -161,6 +165,7 @@ export const ServerSettingsPatch = Schema.Struct({
         Schema.Struct({
           ...ProviderSettingsBasePatch,
           homePath: Schema.optionalKey(StringSetting),
+          profile: Schema.optionalKey(CodexProfileSetting),
         }),
       ),
       claudeAgent: Schema.optionalKey(

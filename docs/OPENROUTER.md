@@ -26,14 +26,14 @@ The CLI profile command is:
 codex --profile openrouter
 ```
 
-## Preserved features
+## Runtime ownership
 
-- MCP injection and Synara's browser automation remain enabled because the
-  runtime is still Codex app-server.
+- Codex owns MCP servers, plugins, skills, and agent tools. Synara does not
+  inject its retired browser-automation MCP into provider sessions.
 - PDF preview remains a local Synara web feature and does not depend on the
   model provider.
 - OpenRouter model support varies. Choose a model with tool calling if you want
-  MCP/browser work.
+  Codex MCP or computer-use work.
 
 ## Current limitation
 

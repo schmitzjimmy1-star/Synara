@@ -156,12 +156,7 @@ export function useSpacesController(input: {
     if (routeThreadId && isOrdinarySpaceProject(currentRouteSpaceProject, workspacePaths)) {
       rememberSpaceThread(currentRouteSpaceProject.spaceId ?? null, routeThreadId);
     }
-  }, [
-    activeRouteProject,
-    rememberSpaceThread,
-    routeThreadId,
-    workspacePaths,
-  ]);
+  }, [activeRouteProject, rememberSpaceThread, routeThreadId, workspacePaths]);
 
   /**
    * Switch spaces without restoring the target space's last context. Used when the
@@ -434,12 +429,7 @@ export function useSpacesController(input: {
         });
       }
     },
-    [
-      activeRouteProjectId,
-      onCloseProjectContextMenu,
-      projectById,
-      selectSpaceForNavigation,
-    ],
+    [activeRouteProjectId, onCloseProjectContextMenu, projectById, selectSpaceForNavigation],
   );
 
   const openSpaceCreator = useCallback((projectIdAfterCreate: ProjectId | null = null) => {

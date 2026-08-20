@@ -10,12 +10,7 @@ type AgentGatewaySessionLeaseCredentials = Pick<
   AgentGatewayCredentialsShape,
   "connectionForThread" | "revokeSessionToken"
 > &
-  Partial<
-    Pick<
-      AgentGatewayCredentialsShape,
-      "cancelSessionTurnRequests" | "retireSessionTurn"
-    >
-  >;
+  Partial<Pick<AgentGatewayCredentialsShape, "cancelSessionTurnRequests" | "retireSessionTurn">>;
 
 export const AGENT_GATEWAY_CREDENTIAL_ROTATION_REQUIRED = "agentGatewayCredentialRotationRequired";
 export const AGENT_GATEWAY_TURN_AUTHORITY_RETIRED = "synaraGatewayTurnAuthorityRetired";

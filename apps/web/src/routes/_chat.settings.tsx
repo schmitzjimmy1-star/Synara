@@ -607,7 +607,6 @@ function SettingsRouteView() {
           resetLabel: "studio section",
           ariaLabel: "Show the Studio section in the sidebar",
         })}
-
       </SettingsSection>
 
       <div id={SETTINGS_TARGETS.environmentPanel} className="space-y-6">
@@ -1229,28 +1228,26 @@ function SettingsRouteView() {
         </div>
         <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
           <div className="flex-1 overflow-y-auto">
-            <div
-              className="mx-auto w-full max-w-2xl px-6 py-8"
-            >
+            <div className="mx-auto w-full max-w-2xl px-6 py-8">
               <div className="mb-8 flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <h1 className="text-xl font-medium tracking-tight text-foreground">
-                      {activeSectionItem.label}
-                    </h1>
-                    <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
-                      {activeSectionItem.description}
-                    </p>
-                  </div>
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    className="shrink-0"
-                    disabled={changedSettingLabels.length === 0}
-                    onClick={() => void restoreDefaults()}
-                  >
-                    <RotateCcwIcon className="size-3.5" />
-                    Restore defaults
-                  </Button>
+                <div className="min-w-0">
+                  <h1 className="text-xl font-medium tracking-tight text-foreground">
+                    {activeSectionItem.label}
+                  </h1>
+                  <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+                    {activeSectionItem.description}
+                  </p>
+                </div>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  className="shrink-0"
+                  disabled={changedSettingLabels.length === 0}
+                  onClick={() => void restoreDefaults()}
+                >
+                  <RotateCcwIcon className="size-3.5" />
+                  Restore defaults
+                </Button>
               </div>
 
               {renderRouteOwnedPanel()}

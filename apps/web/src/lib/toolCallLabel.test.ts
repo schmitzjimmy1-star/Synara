@@ -7,7 +7,6 @@ import {
   deriveSynaraMcpToolTitle,
   extractWebFetchUrl,
   isInspectCommand,
-  isSynaraBrowserToolCall,
   normalizeCompactToolLabel,
   resolveCommandVisualKind,
   sanitizeSynaraMcpToolPreview,
@@ -62,24 +61,6 @@ describe("normalizeCompactToolLabel", () => {
 });
 
 describe("deriveSynaraMcpToolTitle", () => {
-  it("uses stable action-first names for Synara browser tools", () => {
-    for (const status of ["running", "completed", "failed"] as const) {
-      expect(
-        deriveSynaraMcpToolTitle({
-          toolName: "mcp__synara__browser_open",
-          status,
-        }),
-      ).toBe("Open browser tab");
-    }
-
-    expect(
-      deriveSynaraMcpToolTitle({
-        title: "Synara: Browser Snapshot",
-        status: "completed",
-      }),
-    ).toBe("Snapshot browser page");
-  });
-
   it("has intentional running and completed copy for every Synara gateway action", () => {
     const cases = [
       ["synara_context", "Synara is checking its context", "Synara checked its context"],
@@ -264,14 +245,6 @@ describe("deriveSynaraMcpToolTitle", () => {
         status: "failed",
       }),
     ).toBe('Unexpected key "reasoningEffort" for Claude Agent');
-  });
-});
-
-describe("isSynaraBrowserToolCall", () => {
-  it("recognizes canonical presentation titles without a tool identifier", () => {
-    expect(isSynaraBrowserToolCall({ title: "Open browser tab" })).toBe(true);
-    expect(isSynaraBrowserToolCall({ fallbackLabel: "Snapshot browser page" })).toBe(true);
-    expect(isSynaraBrowserToolCall({ title: "Synara listed threads" })).toBe(false);
   });
 });
 

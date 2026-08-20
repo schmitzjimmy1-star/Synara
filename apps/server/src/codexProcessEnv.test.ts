@@ -5,12 +5,44 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  applyCodexProfileLayer,
   buildCodexProcessEnv,
-  disableCodexConfigSections,
   linkOrCopyCodexOverlayEntry,
   prioritizeCodexOverlayEntries,
 } from "./codexProcessEnv";
 import { isProviderCredentialKey } from "./providerChildEnvironment.ts";
+
+describe("applyCodexProfileLayer", () => {
+  it("overrides inference settings while preserving base MCP and plugin configuration", () => {
+    const layered = applyCodexProfileLayer(
+      [
+        'model = "gpt-5.5"',
+        'model_provider = "openai"',
+        "",
+        "[mcp_servers.docs]",
+        'url = "https://developers.openai.com/mcp"',
+        "",
+        '[plugins."computer-history@openai-bundled"]',
+        "enabled = true",
+      ].join("\n"),
+      [
+        'model = "openai/gpt-5.6-sol"',
+        'model_provider = "openrouter"',
+        "",
+        "[model_providers.openrouter]",
+        'base_url = "https://openrouter.ai/api/v1"',
+        'wire_api = "responses"',
+      ].join("\n"),
+    );
+
+    expect(layered).toContain('model = "openai/gpt-5.6-sol"');
+    expect(layered).toContain('model_provider = "openrouter"');
+    expect(layered).toContain("[mcp_servers.docs]");
+    expect(layered).toContain('[plugins."computer-history@openai-bundled"]');
+    expect(layered).toContain("[model_providers.openrouter]");
+    expect(layered).not.toContain('model = "gpt-5.5"');
+  });
+});
 
 describe("linkOrCopyCodexOverlayEntry", () => {
   it("copies auth.json when symlink creation is unavailable", async () => {
@@ -69,28 +101,25 @@ describe("prioritizeCodexOverlayEntries", () => {
   });
 });
 
-describe("disableCodexConfigSections", () => {
-  const canonicalHeader = '[plugins."computer-use@openai-bundled"]';
-
-  it.each([
-    ["literal-quoted", "[plugins.'computer-use@openai-bundled']"],
-    ["whitespace-varied", '[ plugins . "computer-use@openai-bundled" ]'],
-    ["escaped basic-quoted", String.raw`[plugins."computer-use\u0040openai-bundled"]`],
-    ["trailing-comment", "[plugins.'computer-use@openai-bundled'] # keep this comment"],
-  ])("disables a semantically equivalent %s table without appending a duplicate", (_, header) => {
-    const result = disableCodexConfigSections(
-      `${header}\nenabled = true\n\n[plugins.other]\nenabled = true`,
-      [canonicalHeader],
-      true,
-    );
-
-    expect(result).toBe(`${header}\nenabled = false\n\n[plugins.other]\nenabled = true`);
-    expect(result.match(/enabled = false/g)).toHaveLength(1);
-    expect(result).not.toContain(canonicalHeader);
-  });
-});
-
 describe("buildCodexProcessEnv", () => {
+  it("rejects profile names that can escape the Codex home", async () => {
+    const sourceHome = mkdtempSync(path.join(os.tmpdir(), "synara-codex-profile-"));
+    writeFileSync(path.join(sourceHome, "config.toml"), 'model = "gpt-5.6-sol"\n', "utf8");
+
+    try {
+      await expect(
+        buildCodexProcessEnv({
+          env: { SYNARA_HOME: sourceHome },
+          homePath: sourceHome,
+          profile: "../outside",
+          platform: "darwin",
+        }),
+      ).rejects.toThrow("Invalid Codex profile name");
+    } finally {
+      rmSync(sourceHome, { recursive: true, force: true });
+    }
+  });
+
   it("registers the active custom provider env key for diagnostic redaction", async () => {
     const codexHome = mkdtempSync(path.join(os.tmpdir(), "synara-codex-provider-key-"));
     writeFileSync(

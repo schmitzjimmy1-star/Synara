@@ -3,8 +3,6 @@ import { ProjectId, ThreadId, TurnId, type OrchestrationThreadShell } from "@syn
 import { Deferred, Effect, Fiber, Option } from "effect";
 
 import type { ProjectionSnapshotQueryShape } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import { makeAgentGatewayBrowserTools } from "./browserTools.ts";
-import { BrowserHostRpcError } from "../browserAutomation/browserHostRpcClient.ts";
 import { makeAgentGatewaySessionRegistry } from "./Layers/AgentGatewaySessionRegistry.ts";
 import type { AgentGatewayCredentialsShape } from "./Services/AgentGatewayCredentials.ts";
 import { makeAgentGatewayInFlightRequestRegistry } from "./inFlightRequestRegistry.ts";
@@ -198,7 +196,7 @@ describe("makeAgentGatewayMcpTransport cancellation", () => {
           threads: [makeThread("thread-rotated")],
           tool: {
             definition: {
-              name: "browser_click",
+              name: "synara_test_action",
               description: "test",
               inputSchema: { type: "object" },
             },
@@ -220,9 +218,9 @@ describe("makeAgentGatewayMcpTransport cancellation", () => {
         transport.setThreadTurn("thread-rotated", "turn-b");
         const body = {
           jsonrpc: "2.0",
-          id: "browser-click",
+          id: "test-action",
           method: "tools/call",
-          params: { name: "browser_click", arguments: {} },
+          params: { name: "synara_test_action", arguments: {} },
         };
 
         const lateA = yield* post(transport, "token-1", body);
@@ -240,18 +238,24 @@ describe("makeAgentGatewayMcpTransport cancellation", () => {
         const hostStarted = yield* Deferred.make<void>();
         const hostAbortObserved = yield* Deferred.make<void>();
         let hostCalls = 0;
-        const browserWait = makeAgentGatewayBrowserTools({
-          available: true,
-          execute: () => {
+        const detachedTool: ToolEntry = {
+          definition: {
+            name: "synara_test_wait",
+            description: "test cancellation",
+            inputSchema: { type: "object" },
+          },
+          requiredCapability: "browser:control",
+          requiresActiveTurn: true,
+          handler: () => {
             hostCalls += 1;
             return Effect.tryPromise({
-              try: (signal) => {
-                return new Promise<never>((_resolve, reject) => {
+              try: (signal) =>
+                new Promise<never>((_resolve, reject) => {
                   signal.addEventListener(
                     "abort",
                     () => {
                       Deferred.doneUnsafe(hostAbortObserved, Effect.void);
-                      reject(new Error("browser host request aborted"));
+                      reject(new Error("test request aborted"));
                     },
                     { once: true },
                   );
@@ -259,28 +263,22 @@ describe("makeAgentGatewayMcpTransport cancellation", () => {
                   // the re-entrant window where a direct interrupt would miss
                   // Effect's not-yet-installed AbortController finalizer.
                   Deferred.doneUnsafe(hostStarted, Effect.void);
-                });
-              },
-              catch: (error) => new BrowserHostRpcError("transport", String(error)),
-            });
+                }),
+              catch: (error) => new Error(String(error)),
+            }).pipe(Effect.orDie);
           },
-        }).find((tool) => tool.definition.name === "browser_wait");
-        assert.isDefined(browserWait);
+        };
         const transport = makeTransport({
           threads: [makeThread("thread-detached")],
-          tool: browserWait!,
+          tool: detachedTool,
         });
         const body = {
           jsonrpc: "2.0",
-          id: "detached-browser-wait",
+          id: "detached-test-wait",
           method: "tools/call",
           params: {
-            name: "browser_wait",
-            arguments: {
-              tabId: "53756993-1de8-47a5-82c9-e00766199802",
-              conditions: [{ kind: "text", text: "STOP_SENTINEL_NEVER_APPEARS", state: "present" }],
-              timeoutMs: 30_000,
-            },
+            name: "synara_test_wait",
+            arguments: {},
           },
         };
 

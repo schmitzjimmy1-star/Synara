@@ -3,10 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname } from "node:path";
 import { join } from "node:path";
-import {
-  DEFAULT_GIT_TEXT_GENERATION_MODEL,
-  DEFAULT_MODEL_BY_PROVIDER,
-} from "@synara/contracts";
+import { DEFAULT_GIT_TEXT_GENERATION_MODEL, DEFAULT_MODEL_BY_PROVIDER } from "@synara/contracts";
 import { Effect, FileSystem, Layer } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
 import { ServerConfig } from "./config";

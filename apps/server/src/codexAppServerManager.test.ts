@@ -13,19 +13,9 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
-import {
-  ApprovalRequestId,
-  BROWSER_TOOL_NAMES,
-  ThreadId,
-  TurnId,
-  type RuntimeMode,
-} from "@synara/contracts";
+import { ApprovalRequestId, ThreadId, TurnId, type RuntimeMode } from "@synara/contracts";
 
-import {
-  buildCodexProcessEnv,
-  disableCodexConfigSections,
-  SYNARA_COMPETING_BROWSER_PLUGIN_SECTION_HEADERS,
-} from "./codexProcessEnv";
+import { buildCodexProcessEnv } from "./codexProcessEnv";
 import {
   buildCodexInitializeParams,
   buildCodexThreadOpenRequest,
@@ -46,7 +36,6 @@ import {
 } from "./codexWorkingDirectory";
 import { CodexJsonlFramer, CodexJsonlWriter } from "./codexAppServerTransport";
 import { ensureIsolatedScratchWorkspace } from "./scratchWorkspaces";
-import { SYNARA_HARNESS_POLICY_MARKER } from "./agentGateway/harnessPolicy.ts";
 import {
   AGENT_GATEWAY_TURN_AUTHORITY_RETIRED,
   acquireAgentGatewaySessionLease,
@@ -70,22 +59,16 @@ const autoTurnOverrides = {
   sandboxPolicy: { type: "workspaceWrite" },
 } as const;
 
-describe("Codex Synara harness policy", () => {
-  it("keeps the same host policy exactly once in default and plan instructions", () => {
+describe("Codex collaboration instructions", () => {
+  it("does not inject Synara tool ownership into default or plan instructions", () => {
     for (const instructions of [
       CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
       CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
     ]) {
-      expect(instructions).toContain(SYNARA_HARNESS_POLICY_MARKER);
-      expect(instructions.split(SYNARA_HARNESS_POLICY_MARKER)).toHaveLength(2);
-      expect(instructions).toContain("Synara is the host and harness");
-      expect(instructions).toContain("one exact synara_create_threads plan");
-      expect(instructions).toContain("tools.mcp__synara__browser_open");
-      for (const name of BROWSER_TOOL_NAMES) {
-        expect(instructions, name).toContain(`\`${name.slice("browser_".length)}\``);
-      }
-      expect(instructions).toContain("Do not search or filter \`ALL_TOOLS\`");
-      expect(instructions).toContain("sequentially in one \`functions.exec\` invocation");
+      expect(instructions).toContain("<collaboration_mode>");
+      expect(instructions).not.toContain("Synara harness policy");
+      expect(instructions).not.toContain("synara_create_threads");
+      expect(instructions).not.toContain("tools.mcp__synara__browser_");
     }
   });
 
@@ -1053,7 +1036,7 @@ describe("buildCodexProcessEnv", () => {
     }
   });
 
-  it("applies durable section suppressions inside Synara's Codex overlay", async () => {
+  it("preserves official Codex plugins and ignores legacy suppression markers", async () => {
     const tempDir = mkdtempSync(path.join(os.tmpdir(), "synara-codex-env-"));
     const runtimeHome = mkdtempSync(path.join(os.tmpdir(), "synara-runtime-home-"));
     try {
@@ -1063,13 +1046,11 @@ describe("buildCodexProcessEnv", () => {
           '[plugins."github@openai-curated"]',
           "enabled = true",
           "",
-          ...SYNARA_COMPETING_BROWSER_PLUGIN_SECTION_HEADERS.flatMap((header) => [
-            header,
-            "enabled = true",
-            "",
-          ]),
-          '[plugins."historical-plugin@local"]',
-          "enabled = true",
+          ...[
+            '[plugins."browser@openai-bundled"]',
+            '[plugins."chrome@openai-bundled"]',
+            '[plugins."computer-use@openai-bundled"]',
+          ].flatMap((header) => [header, "enabled = true", ""]),
         ].join("\n"),
         "utf8",
       );
@@ -1080,7 +1061,11 @@ describe("buildCodexProcessEnv", () => {
         path.join(overlayHome, "synara-config-suppressions-v1.json"),
         `${JSON.stringify({
           version: 1,
-          sectionHeaders: ['[plugins."historical-plugin@local"]'],
+          sectionHeaders: [
+            '[plugins."browser@openai-bundled"]',
+            '[plugins."chrome@openai-bundled"]',
+            '[plugins."computer-use@openai-bundled"]',
+          ],
         })}\n`,
         "utf8",
       );
@@ -1096,96 +1081,18 @@ describe("buildCodexProcessEnv", () => {
       if (typeof codexHome !== "string") {
         throw new Error("Expected CODEX_HOME to be set.");
       }
-      expect(readFileSync(path.join(codexHome, "config.toml"), "utf8")).toContain(
-        '[plugins."historical-plugin@local"]\nenabled = false',
-      );
-      for (const header of SYNARA_COMPETING_BROWSER_PLUGIN_SECTION_HEADERS) {
+      for (const header of [
+        '[plugins."browser@openai-bundled"]',
+        '[plugins."chrome@openai-bundled"]',
+        '[plugins."computer-use@openai-bundled"]',
+      ]) {
         expect(readFileSync(path.join(codexHome, "config.toml"), "utf8")).toContain(
-          `${header}\nenabled = false`,
+          `${header}\nenabled = true`,
         );
         expect(readFileSync(path.join(tempDir, "config.toml"), "utf8")).toContain(
           `${header}\nenabled = true`,
         );
       }
-      expect(readFileSync(path.join(tempDir, "config.toml"), "utf8")).toContain(
-        '[plugins."historical-plugin@local"]\nenabled = true',
-      );
-    } finally {
-      rmSync(tempDir, { recursive: true, force: true });
-      rmSync(runtimeHome, { recursive: true, force: true });
-    }
-  });
-
-  it("seeds markerless suppressions for conflicting local browser plugins", async () => {
-    const tempDir = mkdtempSync(path.join(os.tmpdir(), "synara-codex-env-"));
-    const runtimeHome = mkdtempSync(path.join(os.tmpdir(), "synara-runtime-home-"));
-    try {
-      const conflictingHeader = '[plugins."bridge-browser@local"]';
-      writeFileSync(
-        path.join(tempDir, "config.toml"),
-        [conflictingHeader, "enabled = true", "", '[plugins."other@local"]', "enabled = true"].join(
-          "\n",
-        ),
-        "utf8",
-      );
-
-      const overlayHome = path.join(runtimeHome, "codex-home-overlay");
-      const env = await buildCodexProcessEnv({
-        env: { SYNARA_HOME: runtimeHome },
-        homePath: tempDir,
-        platform: "darwin",
-      });
-
-      expect(env.CODEX_HOME).toBe(overlayHome);
-      const overlayConfig = readFileSync(path.join(overlayHome, "config.toml"), "utf8");
-      expect(overlayConfig).toContain(`${conflictingHeader}\nenabled = false`);
-      expect(overlayConfig).toContain('[plugins."other@local"]\nenabled = true');
-      expect(readFileSync(path.join(tempDir, "config.toml"), "utf8")).toContain(
-        `${conflictingHeader}\nenabled = true`,
-      );
-      const suppressionMarker = JSON.parse(
-        readFileSync(path.join(overlayHome, "synara-config-suppressions-v1.json"), "utf8"),
-      ) as { sectionHeaders?: string[] };
-      expect(suppressionMarker.sectionHeaders).toContain(conflictingHeader);
-    } finally {
-      rmSync(tempDir, { recursive: true, force: true });
-      rmSync(runtimeHome, { recursive: true, force: true });
-    }
-  });
-
-  it("preserves a recorded suppression after its plugin disappears from source config", async () => {
-    const tempDir = mkdtempSync(path.join(os.tmpdir(), "synara-codex-env-"));
-    const runtimeHome = mkdtempSync(path.join(os.tmpdir(), "synara-runtime-home-"));
-    try {
-      writeFileSync(path.join(tempDir, "config.toml"), 'model = "gpt-5.5"', "utf8");
-
-      const overlayHome = path.join(runtimeHome, "codex-home-overlay");
-      mkdirSync(overlayHome, { recursive: true });
-      writeFileSync(
-        path.join(overlayHome, "synara-config-suppressions-v1.json"),
-        `${JSON.stringify({
-          version: 1,
-          sectionHeaders: ['[plugins."historical-plugin@local"]'],
-        })}\n`,
-        "utf8",
-      );
-
-      const env = await buildCodexProcessEnv({
-        env: { SYNARA_HOME: runtimeHome },
-        homePath: tempDir,
-        platform: "darwin",
-      });
-
-      const codexHome = env.CODEX_HOME;
-      if (typeof codexHome !== "string") {
-        throw new Error("Expected CODEX_HOME to be set.");
-      }
-      expect(readFileSync(path.join(codexHome, "config.toml"), "utf8")).toContain(
-        '[plugins."historical-plugin@local"]\nenabled = false',
-      );
-      expect(readFileSync(path.join(tempDir, "config.toml"), "utf8")).not.toContain(
-        "historical-plugin@local",
-      );
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
       rmSync(runtimeHome, { recursive: true, force: true });
@@ -1277,17 +1184,6 @@ describe("buildCodexProcessEnv", () => {
       rmSync(tempDir, { recursive: true, force: true });
       rmSync(runtimeHome, { recursive: true, force: true });
     }
-  });
-
-  it("disables only explicitly recorded plugin sections", () => {
-    expect(
-      disableCodexConfigSections(
-        '[plugins."historical-plugin@local"]\nenabled = true\n\n[plugins."other@local"]\nenabled = true',
-        ['[plugins."historical-plugin@local"]'],
-      ),
-    ).toBe(
-      '[plugins."historical-plugin@local"]\nenabled = false\n\n[plugins."other@local"]\nenabled = true',
-    );
   });
 });
 

@@ -343,15 +343,7 @@ describe("composerSlashCommands", () => {
       canOfferExportCommand: true,
     });
 
-    expect(commands).toEqual([
-      "fork",
-      "side",
-      "export",
-      "goal",
-      "debug",
-      "default",
-      "feedback",
-    ]);
+    expect(commands).toEqual(["fork", "side", "export", "goal", "debug", "default", "feedback"]);
   });
 
   it("omits the app-level /fork command for claude when the composer is not empty", () => {

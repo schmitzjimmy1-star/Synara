@@ -7,10 +7,7 @@ import {
   SYNARA_MANAGED_CODEX_CONFIG_BEGIN,
   SYNARA_MANAGED_CODEX_CONFIG_END,
 } from "../codexProcessEnv.ts";
-import {
-  buildCodexMcpConfigToml,
-  SYNARA_AGENT_GATEWAY_TOKEN_ENV,
-} from "./mcpInjection.ts";
+import { buildCodexMcpConfigToml, SYNARA_AGENT_GATEWAY_TOKEN_ENV } from "./mcpInjection.ts";
 
 describe("Codex agent gateway MCP injection", () => {
   const endpoint = "http://127.0.0.1:3773/mcp";

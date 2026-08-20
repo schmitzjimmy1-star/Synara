@@ -1,8 +1,6 @@
 // FILE: SkillsSettingsPanel.tsx
-// Purpose: Settings → Skills panel. Lists every skill from the unified cross-provider
-// catalog (~/.synara/skills plus each provider's skills folder), shows which provider
-// a skill comes from, and lets the user enable/disable each one. Disabled skills are
-// hidden from the composer skill picker on every provider.
+// Purpose: Settings → Skills panel. Lists the skills reported by Codex and lets
+// the user hide individual entries from Synara's composer picker.
 
 import type { ProviderKind, ServerSettings } from "@synara/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -95,19 +93,12 @@ export function SkillsSettingsPanel() {
 
   const totalSkills = skillGroups.length;
   const enabledSkills = skillGroups.filter((group) => !disabledSkillNames.has(group.key)).length;
-  const synaraSkillsDir = catalogQuery.data?.synaraSkillsDir;
-
   return (
     <div className="space-y-8">
-      <SettingsSection title="Portable skills">
+      <SettingsSection title="Codex skills">
         <SettingsRow
-          title="Synara skills folder"
-          description="Skills placed here are available on every provider. When a provider already ships its own copy of a skill, that copy is used; otherwise Synara's copy is the fallback."
-          status={
-            synaraSkillsDir ? (
-              <code className="break-all text-[11px] text-muted-foreground">{synaraSkillsDir}</code>
-            ) : null
-          }
+          title="Managed by Codex"
+          description="Synara displays the skills reported by your Codex CLI. Install and manage skills through Codex; these switches only hide them from the composer picker."
           control={
             <span className="text-xs font-medium text-muted-foreground">
               {catalogQuery.isLoading
@@ -131,7 +122,7 @@ export function SkillsSettingsPanel() {
         <SettingsSection title="Skills">
           <SettingsRow
             title="No skills found"
-            description="Add a skill folder containing a SKILL.md to the Synara skills folder above, or install skills for any supported provider."
+            description="Install a skill through Codex, then refresh this page."
           />
         </SettingsSection>
       ) : null}

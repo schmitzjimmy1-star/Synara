@@ -248,22 +248,6 @@
       "types": "./src/threadMentions.ts",
       "import": "./src/threadMentions.ts"
     },
-    "./browserAutomationCatalogue": {
-      "types": "./src/browserAutomationCatalogue.ts",
-      "import": "./src/browserAutomationCatalogue.ts"
-    },
-    "./browserAutomationPresentation": {
-      "types": "./src/browserAutomationPresentation.ts",
-      "import": "./src/browserAutomationPresentation.ts"
-    },
-    "./browserAutomationErrors": {
-      "types": "./src/browserAutomationErrors.ts",
-      "import": "./src/browserAutomationErrors.ts"
-    },
-    "./browserAutomationMcpError": {
-      "types": "./src/browserAutomationMcpError.ts",
-      "import": "./src/browserAutomationMcpError.ts"
-    },
     "./unifiedPatchStats": {
       "types": "./src/unifiedPatchStats.ts",
       "import": "./src/unifiedPatchStats.ts"

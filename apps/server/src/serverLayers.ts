@@ -1,10 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Layer } from "effect";
 
-import { AgentGatewayLive } from "./agentGateway/Layers/AgentGateway";
 import { AgentGatewayOperationRepositoryLive } from "./agentGateway/Layers/AgentGatewayOperationRepository";
-import { AgentGatewayCredentialsWithSecretsLive } from "./agentGateway/Layers/AgentGatewayCredentials";
-import { BrowserAutomationHostLive } from "./browserAutomation/Layers/BrowserAutomationHost";
 import { CheckpointDiffQueryLive } from "./checkpointing/Layers/CheckpointDiffQuery";
 import { CheckpointStoreLive } from "./checkpointing/Layers/CheckpointStore";
 import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor";
@@ -42,11 +39,10 @@ import { ExternalMcpRepositoryLive } from "./externalMcp/Layers/ExternalMcpRepos
 import { ExternalMcpServiceLive } from "./externalMcp/Layers/ExternalMcpService";
 import { ExternalMcpGatewayLive } from "./externalMcp/Layers/ExternalMcpGateway";
 import { ServerEnvironmentLive } from "./environment/Layers/ServerEnvironment";
+import { ThreadDiagnosticsQueryLive } from "./diagnostics/Layers/ThreadDiagnosticsQuery";
 import { ProjectPullRequestPinsLive } from "./persistence/Layers/ProjectPullRequestPins";
 import { ProjectionTurnRepositoryLive } from "./persistence/Layers/ProjectionTurns";
 import { OrchestrationEventDeliveryRepositoryLive } from "./persistence/Layers/OrchestrationEventDeliveries";
-import { ProviderRuntimeEventRepositoryLive } from "./persistence/Layers/ProviderRuntimeEvents";
-import { ThreadDiagnosticsQueryLive } from "./diagnostics/Layers/ThreadDiagnosticsQuery";
 import { ManagedAttachmentCleanupLive } from "./managedAttachmentCleanup";
 import { PullRequestServiceLive } from "./pullRequests/Layers/PullRequestService";
 import { CodexProviderHealthLive } from "./provider/Layers/CodexProviderHealth";
@@ -67,13 +63,7 @@ export function provideThreadDeletionReactorDeviceService<
   return reactorLayer.pipe(Layer.provideMerge(deviceServiceLayer));
 }
 
-export function makeServerRuntimeServicesLayer(
-  options: {
-    readonly agentGatewayCredentialsLayer?: typeof AgentGatewayCredentialsWithSecretsLive;
-  } = {},
-) {
-  const agentGatewayCredentialsLayer =
-    options.agentGatewayCredentialsLayer ?? AgentGatewayCredentialsWithSecretsLive;
+export function makeServerRuntimeServicesLayer() {
   const providerHealthLayer = CodexProviderHealthLive.pipe(Layer.provideMerge(ServerSettingsLive));
   const checkpointStoreLayer = CheckpointStoreLive.pipe(Layer.provide(GitCoreLive));
 
@@ -170,19 +160,6 @@ export function makeServerRuntimeServicesLayer(
     Layer.provideMerge(ServerSettingsLive),
     Layer.provideMerge(providerHealthLayer),
   );
-  const agentGatewayLayer = AgentGatewayLive.pipe(
-    Layer.provideMerge(agentGatewayCredentialsLayer),
-    Layer.provideMerge(runtimeServicesLayer),
-    Layer.provideMerge(GitCoreLive),
-    Layer.provideMerge(ProjectionTurnRepositoryLive),
-    Layer.provideMerge(AgentGatewayOperationRepositoryLive),
-    Layer.provideMerge(OrchestrationEventDeliveryRepositoryLive),
-    Layer.provideMerge(ProviderRuntimeEventRepositoryLive),
-    Layer.provideMerge(ThreadDiagnosticsQueryLive),
-    Layer.provideMerge(ServerSettingsLive),
-    Layer.provideMerge(providerHealthLayer),
-    Layer.provideMerge(BrowserAutomationHostLive),
-  );
   const pullRequestServiceLayer = PullRequestServiceLive.pipe(
     Layer.provideMerge(GitLayerLive),
     Layer.provideMerge(ProjectPullRequestPinsLive),
@@ -190,9 +167,6 @@ export function makeServerRuntimeServicesLayer(
   );
 
   return Layer.mergeAll(
-    agentGatewayCredentialsLayer,
-    agentGatewayLayer,
-    BrowserAutomationHostLive,
     managedAttachmentCleanupLayer,
     AgentGatewayOperationRepositoryLive,
     ExternalMcpRepositoryLive,
@@ -213,6 +187,7 @@ export function makeServerRuntimeServicesLayer(
     KeybindingsLive,
     ServerSettingsLive,
     ServerEnvironmentLive,
+    ThreadDiagnosticsQueryLive,
     ProfileStatsQueryLive,
     authServicesLayer,
     ServerLifecycleEventsLive,
@@ -222,17 +197,9 @@ export function makeServerRuntimeServicesLayer(
   ).pipe(Layer.provideMerge(NodeServices.layer));
 }
 
-/**
- * Compose the two top-level server graphs around one credential layer. Provider
- * adapters issue tokens from this registry and the HTTP gateway verifies those
- * same tokens, so constructing them independently would break scoped MCP.
- */
 export function makeServerApplicationLayers() {
-  const agentGatewayCredentialsLayer = AgentGatewayCredentialsWithSecretsLive;
   return {
-    runtimeServicesLayer: makeServerRuntimeServicesLayer({
-      agentGatewayCredentialsLayer,
-    }),
-    providerLayer: makeServerProviderLayer({ agentGatewayCredentialsLayer }),
+    runtimeServicesLayer: makeServerRuntimeServicesLayer(),
+    providerLayer: makeServerProviderLayer(),
   } as const;
 }
