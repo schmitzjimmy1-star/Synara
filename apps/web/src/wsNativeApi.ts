@@ -148,6 +148,33 @@ function omitNullUserInputAnswers(
     ),
   };
 }
+
+function isRetryableDispatchInterruption(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { readonly code?: unknown; readonly retryable?: unknown };
+  return candidate.code === "WS_REQUEST_RECONNECTED" && candidate.retryable === true;
+}
+
+async function dispatchIdempotentOrchestrationCommand(
+  transport: WsTransport,
+  command: Parameters<NativeApi["orchestration"]["dispatchCommand"]>[0],
+): ReturnType<NativeApi["orchestration"]["dispatchCommand"]> {
+  const input = { command: omitNullUserInputAnswers(command) };
+  try {
+    return await transport.request<
+      Awaited<ReturnType<NativeApi["orchestration"]["dispatchCommand"]>>
+    >(ORCHESTRATION_WS_METHODS.dispatchCommand, input);
+  } catch (error) {
+    if (!isRetryableDispatchInterruption(error)) throw error;
+    // Orchestration persists command ids as durable receipts. Reissuing the
+    // identical command after a transport swap either observes the original
+    // result or executes it once; it must never manufacture a new command id.
+    return transport.request<Awaited<ReturnType<NativeApi["orchestration"]["dispatchCommand"]>>>(
+      ORCHESTRATION_WS_METHODS.dispatchCommand,
+      input,
+    );
+  }
+}
 const terminalEventListeners = createListenerRegistry<TerminalEvent>();
 const projectDevServerEventListeners = createListenerRegistry<ProjectDevServerEvent>();
 const automationEventListeners = createListenerRegistry<AutomationStreamEvent>();
@@ -736,11 +763,7 @@ export function createWsNativeApi(): NativeApi {
       getShellSnapshot: () => transport.request(ORCHESTRATION_WS_METHODS.getShellSnapshot),
       getThreadDetailSnapshot: (input) =>
         transport.request(ORCHESTRATION_WS_METHODS.getThreadDetailSnapshot, input),
-      dispatchCommand: (command) => {
-        return transport.request(ORCHESTRATION_WS_METHODS.dispatchCommand, {
-          command: omitNullUserInputAnswers(command),
-        });
-      },
+      dispatchCommand: (command) => dispatchIdempotentOrchestrationCommand(transport, command),
       importThread: (input) => transport.request(ORCHESTRATION_WS_METHODS.importThread, input),
       repairState: () => transport.request(ORCHESTRATION_WS_METHODS.repairState),
       getTurnDiff: (input) => transport.request(ORCHESTRATION_WS_METHODS.getTurnDiff, input),

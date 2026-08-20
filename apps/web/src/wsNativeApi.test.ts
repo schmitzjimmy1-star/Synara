@@ -519,6 +519,41 @@ describe("wsNativeApi", () => {
     });
   });
 
+  it("retries an interrupted orchestration command with the same durable id", async () => {
+    requestMock
+      .mockRejectedValueOnce({
+        code: "WS_REQUEST_RECONNECTED",
+        retryable: true,
+      })
+      .mockResolvedValueOnce(undefined);
+    const { createWsNativeApi } = await import("./wsNativeApi");
+
+    const api = createWsNativeApi();
+    const command = {
+      type: "project.create",
+      commandId: CommandId.makeUnsafe("cmd-reconnect"),
+      projectId: ProjectId.makeUnsafe("project-reconnect"),
+      kind: "project",
+      title: "Project",
+      workspaceRoot: "/tmp/project",
+      defaultModelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
+      createdAt: "2026-02-24T00:00:00.000Z",
+    } as const;
+
+    await api.orchestration.dispatchCommand(command);
+
+    expect(requestMock).toHaveBeenCalledTimes(2);
+    expect(requestMock).toHaveBeenNthCalledWith(1, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      command,
+    });
+    expect(requestMock).toHaveBeenNthCalledWith(2, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      command,
+    });
+  });
+
   it("forwards terminal output ACKs to the websocket transport", async () => {
     requestMock.mockResolvedValue(undefined);
     const { createWsNativeApi } = await import("./wsNativeApi");
