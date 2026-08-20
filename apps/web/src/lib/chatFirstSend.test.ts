@@ -24,6 +24,11 @@ function makeProject(overrides: Partial<Project> = {}): Project {
   };
 }
 
+const SELECTED_MODEL = {
+  provider: "codex" as const,
+  model: "deepseek/deepseek-v4-pro",
+};
+
 describe("resolveFirstSendTarget", () => {
   it("creates a managed date/slug chat project for a plain general chat first send", () => {
     const result = resolveFirstSendTarget({
@@ -33,6 +38,7 @@ describe("resolveFirstSendTarget", () => {
       isFirstMessage: true,
       isHomeChatContainer: true,
       isStudioContainer: false,
+      modelSelection: SELECTED_MODEL,
       projects: [makeProject()],
       selectedWorkspaceRoot: null,
       title: "Yes it takes",
@@ -46,6 +52,7 @@ describe("resolveFirstSendTarget", () => {
         title: "Yes it takes",
         kind: "chat",
         createWorkspaceRootIfMissing: true,
+        defaultModelSelection: SELECTED_MODEL,
       },
     });
   });
@@ -58,6 +65,7 @@ describe("resolveFirstSendTarget", () => {
       isFirstMessage: true,
       isHomeChatContainer: true,
       isStudioContainer: false,
+      modelSelection: SELECTED_MODEL,
       projects: [makeProject()],
       selectedWorkspaceRoot: "/Users/tester/Developer/app",
       title: "Use app",
@@ -71,6 +79,7 @@ describe("resolveFirstSendTarget", () => {
         title: "app",
         kind: "project",
         createWorkspaceRootIfMissing: false,
+        defaultModelSelection: SELECTED_MODEL,
       },
     });
   });
@@ -84,6 +93,7 @@ describe("resolveFirstSendTarget", () => {
       isFirstMessage: false,
       isHomeChatContainer: false,
       isStudioContainer: false,
+      modelSelection: SELECTED_MODEL,
       projects: [activeProject],
       selectedWorkspaceRoot: null,
       title: "Follow up",
@@ -114,6 +124,7 @@ describe("resolveFirstSendTarget", () => {
       isFirstMessage: true,
       isHomeChatContainer: false,
       isStudioContainer: true,
+      modelSelection: SELECTED_MODEL,
       projects: [activeProject],
       selectedWorkspaceRoot: null,
       title: "Write content",
@@ -145,6 +156,7 @@ describe("resolveFirstSendTarget", () => {
       isFirstMessage: true,
       isHomeChatContainer: false,
       isStudioContainer: true,
+      modelSelection: SELECTED_MODEL,
       projects: [activeProject],
       selectedWorkspaceRoot: "/Users/tester/Developer/app",
       title: "Use app",

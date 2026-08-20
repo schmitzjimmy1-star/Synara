@@ -1,4 +1,4 @@
-import { DEFAULT_MODEL_BY_PROVIDER, type ModelSelection } from "@synara/contracts";
+import type { ModelSelection } from "@synara/contracts";
 import { workspaceRootsEqual } from "@synara/shared/threadWorkspace";
 
 import type { Project } from "../types";
@@ -46,6 +46,7 @@ export function resolveFirstSendTarget(input: {
   isFirstMessage: boolean;
   isHomeChatContainer: boolean;
   isStudioContainer: boolean;
+  modelSelection: ModelSelection;
   projects: readonly Project[];
   selectedWorkspaceRoot: string | null;
   title: string;
@@ -58,6 +59,7 @@ export function resolveFirstSendTarget(input: {
     isFirstMessage,
     isHomeChatContainer,
     isStudioContainer,
+    modelSelection,
     projects,
     selectedWorkspaceRoot,
     title,
@@ -102,10 +104,7 @@ export function resolveFirstSendTarget(input: {
         title,
         kind: "chat",
         createWorkspaceRootIfMissing: true,
-        defaultModelSelection: {
-          provider: "codex",
-          model: DEFAULT_MODEL_BY_PROVIDER.codex,
-        },
+        defaultModelSelection: modelSelection,
       },
     };
   }
@@ -128,10 +127,7 @@ export function resolveFirstSendTarget(input: {
       title: buildProjectTitleFromWorkspaceRoot(selectedWorkspaceRoot),
       kind: "project",
       createWorkspaceRootIfMissing: false,
-      defaultModelSelection: {
-        provider: "codex",
-        model: DEFAULT_MODEL_BY_PROVIDER.codex,
-      },
+      defaultModelSelection: modelSelection,
     },
   };
 }

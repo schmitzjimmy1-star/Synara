@@ -23,18 +23,8 @@ function snapshot(
 }
 
 describe("provider usage metadata", () => {
-  it("exposes a live usage source for every Synara provider", () => {
-    expect([...PROVIDER_USAGE_PROVIDERS]).toEqual([
-      "codex",
-      "claudeAgent",
-      "cursor",
-      "antigravity",
-      "grok",
-      "droid",
-      "kilo",
-      "opencode",
-      "pi",
-    ]);
+  it("exposes only the live Codex usage source", () => {
+    expect([...PROVIDER_USAGE_PROVIDERS]).toEqual(["codex"]);
   });
 
   it("keeps every unsigned card visible when nothing is connected", () => {
@@ -45,8 +35,6 @@ describe("provider usage metadata", () => {
     ];
     expect(selectVisibleProviderUsageSnapshots(snapshots).map((item) => item.provider)).toEqual([
       "codex",
-      "antigravity",
-      "grok",
     ]);
   });
 
@@ -59,7 +47,6 @@ describe("provider usage metadata", () => {
     ];
     expect(selectVisibleProviderUsageSnapshots(snapshots).map((item) => item.provider)).toEqual([
       "codex",
-      "grok",
     ]);
   });
 

@@ -41,6 +41,10 @@ export interface DesktopNativeBuildHostInput {
   readonly platform: "linux" | "mac" | "win";
 }
 
+export function macTargetIncludesUpdateZip(target: string): boolean {
+  return target === "dmg" || target === "zip";
+}
+
 export function validateDesktopNativeBuildHost(input: DesktopNativeBuildHostInput): string | null {
   if (input.platform === "mac" && input.hostPlatform !== "darwin") {
     return [

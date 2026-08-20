@@ -17,6 +17,12 @@ export function resolveTemporaryThreadIdToDelete(input: {
     return null;
   }
   const previousDraftThread = input.draftThreadsByThreadId[previousThreadId];
+  // Promotion briefly removes a draft from route restoration before the server
+  // thread arrives in the shell snapshot. That focus gap is not abandonment:
+  // deleting here races the accepted first turn and destroys a live thread.
+  if (previousDraftThread?.promotedTo) {
+    return null;
+  }
   if (input.previousThreadWasTemporary !== true && previousDraftThread?.isTemporary !== true) {
     return null;
   }

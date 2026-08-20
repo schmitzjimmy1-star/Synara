@@ -7236,6 +7236,7 @@ export default function ChatView({
       isFirstMessage,
       isHomeChatContainer,
       isStudioContainer,
+      modelSelection: selectedModelSelectionForSend,
       projects: currentStoreState.projects,
       // Studio reference folders change the thread cwd without moving the chat out of
       // the managed Studio project. Home-chat folder selection keeps its project routing.

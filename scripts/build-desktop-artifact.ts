@@ -17,6 +17,7 @@ import serverPackageJson from "../apps/server/package.json" with { type: "json" 
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
 import {
   createDesktopPlatformBuildConfig,
+  macTargetIncludesUpdateZip,
   MAC_APPSNAP_HELPER_STAGE_PATH,
   validateDesktopNativeBuildHost,
 } from "./lib/desktop-platform-build-config.ts";
@@ -1120,7 +1121,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     );
   }
 
-  if (options.platform === "mac") {
+  if (options.platform === "mac" && macTargetIncludesUpdateZip(options.target)) {
     yield* Effect.log("[desktop-artifact] Repacking and validating macOS update zip...");
     const finalizedZip = yield* Effect.tryPromise({
       try: () =>
@@ -1146,6 +1147,35 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   yield* fs.makeDirectory(options.outputDir, { recursive: true });
 
   const copiedArtifacts: string[] = [];
+  if (options.platform === "mac" && options.target === "dir") {
+    const appBundles: string[] = [];
+    for (const entry of stageEntries) {
+      const candidateDirectory = path.join(stageDistDir, entry);
+      const candidateStat = yield* fs
+        .stat(candidateDirectory)
+        .pipe(Effect.catch(() => Effect.succeed(null)));
+      if (!candidateStat || candidateStat.type !== "Directory") continue;
+      const children = yield* fs.readDirectory(candidateDirectory);
+      for (const child of children) {
+        if (!child.endsWith(".app")) continue;
+        const appBundle = path.join(candidateDirectory, child);
+        const appBundleStat = yield* fs
+          .stat(appBundle)
+          .pipe(Effect.catch(() => Effect.succeed(null)));
+        if (appBundleStat?.type === "Directory") {
+          appBundles.push(appBundle);
+        }
+      }
+    }
+    if (appBundles.length !== 1) {
+      return yield* new BuildScriptError({
+        message: `Expected one macOS .app directory artifact, found ${appBundles.length}.`,
+      });
+    }
+    const outputAppBundle = path.join(options.outputDir, path.basename(appBundles[0]!));
+    yield* fs.copy(appBundles[0]!, outputAppBundle);
+    copiedArtifacts.push(outputAppBundle);
+  }
   for (const entry of stageEntries) {
     const from = path.join(stageDistDir, entry);
     const stat = yield* fs.stat(from).pipe(Effect.catch(() => Effect.succeed(null)));

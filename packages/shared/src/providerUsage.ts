@@ -6,12 +6,10 @@
 // Layer: cross-cutting (no runtime deps beyond the ProviderKind type).
 
 import type { ProviderKind, ServerProviderUsageSnapshot } from "@synara/contracts";
-import { PROVIDER_DESCRIPTORS, PROVIDER_DESCRIPTOR_BY_KIND } from "./providerMetadata";
+import { PROVIDER_DESCRIPTOR_BY_KIND } from "./providerMetadata";
 
 /** Providers, in display order, that expose a live usage source. */
-export const PROVIDER_USAGE_PROVIDERS: ReadonlyArray<ProviderKind> = PROVIDER_DESCRIPTORS.flatMap(
-  (descriptor) => (descriptor.usage ? [descriptor.kind] : []),
-);
+export const PROVIDER_USAGE_PROVIDERS: ReadonlyArray<ProviderKind> = ["codex"];
 
 // Provider ids cross the WebSocket as plain strings (rate-limit event payloads), so the
 // lookup helpers accept any string and resolve against the typed metadata table at runtime.

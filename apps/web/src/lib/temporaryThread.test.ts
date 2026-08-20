@@ -86,4 +86,28 @@ describe("resolveTemporaryThreadIdToDelete", () => {
       }),
     ).toBe(THREAD_A);
   });
+
+  it("does not delete a temporary draft after it has been promoted to a server thread", () => {
+    expect(
+      resolveTemporaryThreadIdToDelete({
+        previousThreadId: THREAD_A,
+        nextThreadId: THREAD_B,
+        previousThreadWasTemporary: true,
+        draftThreadsByThreadId: {
+          [THREAD_A]: {
+            projectId: PROJECT_ID,
+            createdAt: "2026-04-07T10:00:00.000Z",
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            entryPoint: "chat",
+            branch: null,
+            worktreePath: null,
+            envMode: "local",
+            isTemporary: true,
+            promotedTo: THREAD_A,
+          },
+        },
+      }),
+    ).toBeNull();
+  });
 });

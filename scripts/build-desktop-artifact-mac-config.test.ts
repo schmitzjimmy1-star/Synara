@@ -7,6 +7,7 @@ import {
   MAC_APPSNAP_HELPER_STAGE_PATH,
   MAC_ENTITLEMENTS_PATH,
   MAC_INHERITED_ENTITLEMENTS_PATH,
+  macTargetIncludesUpdateZip,
   MICROPHONE_USAGE_DESCRIPTION,
   NODE_PTY_ASAR_UNPACK_GLOBS,
   validateDesktopNativeBuildHost,
@@ -63,6 +64,12 @@ describe("createDesktopPlatformBuildConfig", () => {
 
     assert.deepStrictEqual(config.dmg, { sign: false, writeUpdateInfo: false });
     assert.equal((config.mac as Record<string, unknown>).identity, "-");
+  });
+
+  it("finalizes updater metadata only for macOS targets that emit a zip", () => {
+    assert.equal(macTargetIncludesUpdateZip("dmg"), true);
+    assert.equal(macTargetIncludesUpdateZip("zip"), true);
+    assert.equal(macTargetIncludesUpdateZip("dir"), false);
   });
 
   it("leaves non-macOS platform configs unchanged", () => {
