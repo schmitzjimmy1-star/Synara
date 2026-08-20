@@ -612,19 +612,25 @@ export async function buildCodexProcessEnv(
     readonly platform?: NodeJS.Platform;
     readonly readEnvironment?: ShellEnvironmentReader;
     readonly appendConfigToml?: string;
+    readonly prepareOverlay?: boolean;
   } = {},
 ): Promise<NodeJS.ProcessEnv> {
   const baseEnv = { ...(input.env ?? process.env) };
-  const overlayHomePath = await prepareSynaraCodexHomeOverlay({
-    env: baseEnv,
-    ...(input.homePath ? { homePath: input.homePath } : {}),
-    ...(input.profile ? { profile: input.profile } : {}),
-    ...(input.appendConfigToml ? { appendConfigToml: input.appendConfigToml } : {}),
-  });
+  const overlayHomePath =
+    input.prepareOverlay === false
+      ? undefined
+      : await prepareSynaraCodexHomeOverlay({
+          env: baseEnv,
+          ...(input.homePath ? { homePath: input.homePath } : {}),
+          ...(input.profile ? { profile: input.profile } : {}),
+          ...(input.appendConfigToml ? { appendConfigToml: input.appendConfigToml } : {}),
+        });
   const configuredEnv =
-    overlayHomePath || input.homePath
-      ? { ...baseEnv, CODEX_HOME: overlayHomePath ?? input.homePath }
-      : baseEnv;
+    input.prepareOverlay === false && input.homePath
+      ? { ...baseEnv, CODEX_HOME: input.homePath }
+      : overlayHomePath || input.homePath
+        ? { ...baseEnv, CODEX_HOME: overlayHomePath ?? input.homePath }
+        : baseEnv;
   const platform = input.platform ?? process.platform;
   const effectiveEnv = buildProviderChildEnvironment({
     provider: "codex",

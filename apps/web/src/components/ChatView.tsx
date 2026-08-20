@@ -8016,16 +8016,10 @@ export default function ChatView({
             () => undefined,
           );
       }
-      if (createdServerThreadForLocalDraft && !turnStartSucceeded) {
-        // This rollback cleans up a retryable draft promotion; do not tombstone the draft id.
-        await api.orchestration
-          .dispatchCommand({
-            type: "thread.delete",
-            commandId: newCommandId(),
-            threadId: threadIdForSend,
-          })
-          .catch(() => undefined);
-      }
+      // A rejected turn-start RPC is ambiguous when the WebSocket reconnects:
+      // the server may already have persisted the message and started Codex.
+      // Keep a newly promoted server thread so reconciliation can recover it;
+      // deleting here races the accepted turn and destroys user-visible work.
       if (createdWorktreeForSendPath && !turnStartSucceeded) {
         const removed = await api.git
           .removeWorktree({

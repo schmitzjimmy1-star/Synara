@@ -102,6 +102,29 @@ describe("prioritizeCodexOverlayEntries", () => {
 });
 
 describe("buildCodexProcessEnv", () => {
+  it("does not mutate a session overlay for read-only CLI probes", async () => {
+    const sourceHome = mkdtempSync(path.join(os.tmpdir(), "synara-codex-source-"));
+    const runtimeHome = mkdtempSync(path.join(os.tmpdir(), "synara-codex-runtime-"));
+    writeFileSync(path.join(sourceHome, "config.toml"), 'model_provider = "openrouter"\n', "utf8");
+
+    try {
+      const env = await buildCodexProcessEnv({
+        env: { SYNARA_HOME: runtimeHome },
+        homePath: sourceHome,
+        platform: "win32",
+        prepareOverlay: false,
+      });
+
+      expect(env.CODEX_HOME).toBe(sourceHome);
+      expect(() =>
+        readFileSync(path.join(runtimeHome, "codex-home-overlay", "config.toml")),
+      ).toThrow();
+    } finally {
+      rmSync(sourceHome, { recursive: true, force: true });
+      rmSync(runtimeHome, { recursive: true, force: true });
+    }
+  });
+
   it("rejects profile names that can escape the Codex home", async () => {
     const sourceHome = mkdtempSync(path.join(os.tmpdir(), "synara-codex-profile-"));
     writeFileSync(path.join(sourceHome, "config.toml"), 'model = "gpt-5.6-sol"\n', "utf8");
