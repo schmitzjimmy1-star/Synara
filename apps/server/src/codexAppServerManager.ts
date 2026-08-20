@@ -46,14 +46,7 @@ import {
   MINIMUM_CODEX_AUTO_REVIEW_CLI_VERSION,
   parseCodexCliVersion,
 } from "./provider/codexCliVersion";
-import {
-  buildCodexMcpConfigToml,
-  SYNARA_AGENT_GATEWAY_TOKEN_ENV,
-} from "./agentGateway/mcpInjection.ts";
-import {
-  AGENT_GATEWAY_TURN_AUTHORITY_RETIRED,
-  type AgentGatewaySessionLease,
-} from "./agentGateway/sessionLease.ts";
+import { AGENT_GATEWAY_TURN_AUTHORITY_RETIRED } from "./agentGateway/sessionLease.ts";
 import { isNonFatalCodexErrorMessage } from "./codexErrorClassification.ts";
 import { buildCodexProcessEnv } from "./codexProcessEnv.ts";
 import { assertCodexWorkingDirectoryExists } from "./codexWorkingDirectory.ts";
@@ -151,8 +144,14 @@ type CodexSessionApprovalOverride = {
   };
 };
 
+interface RetiredAgentGatewaySessionLease {
+  readonly cancelTurn: (turnId: string) => Promise<void>;
+  readonly retireTurn: (turnId: string) => Promise<void>;
+  readonly release: () => void;
+}
+
 interface CodexSessionContext {
-  readonly gatewaySessionLease?: AgentGatewaySessionLease;
+  readonly gatewaySessionLease?: RetiredAgentGatewaySessionLease;
   /** Set once this runtime's bearer is permanently fenced to a terminal turn. */
   gatewayCredentialRetired?: boolean;
   session: ProviderSession;
@@ -949,58 +948,32 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
   >();
 
   private runPromise: (effect: Effect.Effect<unknown, never>) => Promise<unknown>;
-  private readonly agentGatewayMcp:
-    | {
-        readonly endpointUrl: () => string;
-        readonly acquireSessionLease: (threadId: ThreadId) => AgentGatewaySessionLease;
-      }
-    | undefined;
   private readonly teardownProcessTree: typeof teardownProviderProcessTree;
   private readonly taskCompleteFallbackGraceMs: number;
   constructor(
     services?: ServiceMap.ServiceMap<never>,
     options?: {
-      readonly agentGatewayMcp?: {
-        readonly endpointUrl: () => string;
-        readonly acquireSessionLease: (threadId: ThreadId) => AgentGatewaySessionLease;
-      };
       readonly teardownProcessTree?: typeof teardownProviderProcessTree;
       readonly taskCompleteFallbackGraceMs?: number;
     },
   ) {
     super();
     this.runPromise = services ? Effect.runPromiseWith(services) : Effect.runPromise;
-    this.agentGatewayMcp = options?.agentGatewayMcp;
     this.teardownProcessTree = options?.teardownProcessTree ?? teardownProviderProcessTree;
     this.taskCompleteFallbackGraceMs = Math.max(0, options?.taskCompleteFallbackGraceMs ?? 750);
   }
 
-  // The Synara MCP server rides on the shared overlay config (no secrets),
-  // while the per-thread bearer token travels through the app-server process
-  // env referenced by `bearer_token_env_var`.
-  private async buildSessionProcessEnv(
-    homePath: string | undefined,
-    gatewayBearerToken: string | undefined,
-    profile?: string,
-  ) {
-    const env = await buildCodexProcessEnv({
+  private async buildSessionProcessEnv(homePath: string | undefined, profile?: string) {
+    return buildCodexProcessEnv({
       ...(homePath ? { homePath } : {}),
       ...(profile ? { profile } : {}),
-      ...(this.agentGatewayMcp
-        ? { appendConfigToml: buildCodexMcpConfigToml(this.agentGatewayMcp.endpointUrl()) }
-        : {}),
     });
-    if (gatewayBearerToken) {
-      env[SYNARA_AGENT_GATEWAY_TOKEN_ENV] = gatewayBearerToken;
-    }
-    return env;
   }
 
   async startSession(input: CodexAppServerStartSessionInput): Promise<ProviderSession> {
     const threadId = input.threadId;
     const now = new Date().toISOString();
     let context: CodexSessionContext | undefined;
-    let gatewaySessionLease: AgentGatewaySessionLease | undefined;
 
     try {
       const existing = this.sessions.get(threadId);
@@ -1033,19 +1006,13 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
           : {}),
         ...(codexHomePath ? { homePath: codexHomePath } : {}),
       });
-      gatewaySessionLease = this.agentGatewayMcp?.acquireSessionLease(threadId);
       const child = spawnCodexAppServer({
         binaryPath: codexBinaryPath,
         cwd: resolvedCwd,
-        env: await this.buildSessionProcessEnv(
-          codexHomePath,
-          gatewaySessionLease?.connection.bearerToken,
-          codexProfile,
-        ),
+        env: await this.buildSessionProcessEnv(codexHomePath, codexProfile),
       });
 
       context = {
-        ...(gatewaySessionLease ? { gatewaySessionLease } : {}),
         session,
         ...(input.lifecycleGeneration !== undefined
           ? { lifecycleGeneration: input.lifecycleGeneration }
@@ -1226,7 +1193,6 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         this.emitErrorEvent(context, "session/startFailed", message);
         await this.stopSession(threadId);
       } else {
-        gatewaySessionLease?.release();
         this.emitEvent({
           id: EventId.makeUnsafe(randomUUID()),
           kind: "error",
@@ -1774,7 +1740,6 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     const threadId = input.threadId;
     const now = new Date().toISOString();
     let context: CodexSessionContext | undefined;
-    let gatewaySessionLease: AgentGatewaySessionLease | undefined;
 
     try {
       const existing = this.sessions.get(threadId);
@@ -1819,19 +1784,13 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
           : {}),
         ...(codexHomePath ? { homePath: codexHomePath } : {}),
       });
-      gatewaySessionLease = this.agentGatewayMcp?.acquireSessionLease(threadId);
       const child = spawnCodexAppServer({
         binaryPath: codexBinaryPath,
         cwd: resolvedCwd,
-        env: await this.buildSessionProcessEnv(
-          codexHomePath,
-          gatewaySessionLease?.connection.bearerToken,
-          codexProfile,
-        ),
+        env: await this.buildSessionProcessEnv(codexHomePath, codexProfile),
       });
 
       context = {
-        ...(gatewaySessionLease ? { gatewaySessionLease } : {}),
         session,
         account: {
           type: "unknown",
@@ -1917,7 +1876,6 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         this.emitErrorEvent(context, "session/threadForkFailed", message);
         await this.stopSession(threadId);
       } else {
-        gatewaySessionLease?.release();
       }
       throw new Error(message, { cause: error });
     }

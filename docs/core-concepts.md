@@ -89,8 +89,8 @@ several tasks in the same repository.
 
 ## Providers, models, and sessions
 
-A provider is the coding-agent runtime Synara operates, such as Claude Code, Codex, OpenCode, Cursor,
-or another supported integration.
+A provider is the coding-agent runtime Synara operates. This build uses only the official Codex CLI;
+a Codex profile may route model requests through OpenAI, OpenRouter, or another Codex model host.
 
 The provider supplies:
 

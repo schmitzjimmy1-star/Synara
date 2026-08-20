@@ -1,5 +1,5 @@
-# Copy this file to ~/.codex-openrouter/config.toml and point Synara's Codex
-# home path at ~/.codex-openrouter. Codex app-server does not accept --profile.
+# Copy this file to ~/.codex/openrouter.config.toml and select the `openrouter`
+# profile in Synara. Synara reads and layers the profile without modifying it.
 #
 # Keep the secret out of this file. Codex reads it from the process environment.
 model = "openai/gpt-5.6-sol"

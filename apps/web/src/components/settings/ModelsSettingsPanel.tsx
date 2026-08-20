@@ -258,6 +258,11 @@ export function ModelsSettingsPanel({
     <div className="space-y-6">
       <SettingsSection title="Generation defaults">
         <SettingsRow
+          title="Runtime ownership"
+          description="The composer asks Codex for its live model catalog. With the openrouter profile selected, Codex sends those requests through OpenRouter; Synara never calls OpenRouter directly."
+          status="Synara → Codex → profile → model host"
+        />
+        <SettingsRow
           title="Git writing model"
           description="Used for generated commit messages, PR titles, and branch names."
           resetAction={
@@ -308,7 +313,7 @@ export function ModelsSettingsPanel({
       <SettingsSection title="Custom models">
         <SettingsRow
           title="Composer model allowlist"
-          description="Codex runs the task. If its CODEX_HOME uses OpenRouter, add exact OpenRouter slugs here; only these models appear in the composer."
+          description="This filters the live catalog returned by Codex. With the openrouter profile, add an exact provider/model slug such as anthropic/claude-sonnet-5; Synara preserves configured slugs even when Codex publishes no metadata for them."
           resetAction={
             savedCustomModelRows.length > 0 ? (
               <SettingResetButton label="custom models" onClick={resetCustomModels} />
