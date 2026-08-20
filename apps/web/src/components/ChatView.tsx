@@ -85,6 +85,7 @@ import {
   gitStatusQueryOptions,
 } from "~/lib/gitReactQuery";
 import { resolveProviderDiscoveryCwd } from "~/lib/providerDiscovery";
+import { isAmbiguousOrchestrationDispatchFailure } from "~/lib/orchestrationDispatchRecovery";
 import {
   providerComposerCapabilitiesQueryOptions,
   providerCommandsQueryOptions,
@@ -7585,6 +7586,7 @@ export default function ChatView({
     let createdServerThreadForLocalDraft = false;
     let createdWorktreeForSendPath: string | null = null;
     let switchedToLocalCheckout = false;
+    let turnStartDispatchAttempted = false;
     let turnStartSucceeded = false;
     let settledLocalBranchUpdatedForSend = false;
     await (async () => {
@@ -7910,6 +7912,7 @@ export default function ChatView({
         provider: selectedModelSelectionForSend.provider,
         providerOptions: providerOptionsForDispatchForSend,
       });
+      turnStartDispatchAttempted = true;
       await stagedTurnAttachments.runWithDispatch((turnAttachments) =>
         api.orchestration.dispatchCommand({
           type: "thread.turn.start",
@@ -7974,6 +7977,20 @@ export default function ChatView({
       // A user-cancelled worktree setup unwinds through this same rollback,
       // but silently: no error styling on the step row, no thread error.
       const setupCancelled = err instanceof WorktreeSetupCancelledError;
+      if (turnStartDispatchAttempted && isAmbiguousOrchestrationDispatchFailure(err)) {
+        // The command may already be durable and Codex may already be running.
+        // Preserve blobs, workspace metadata, the optimistic message, and the
+        // watchdog so the next snapshot can reconcile the actual outcome.
+        // Treat this queued item as handled so it cannot be dispatched twice.
+        turnStartSucceeded = true;
+        armLocalDispatchAckFallback(threadIdForSend);
+        toastManager.add({
+          type: "warning",
+          title: "Connection interrupted after send",
+          description: "Synara is reconnecting and checking the existing turn.",
+        });
+        return;
+      }
       // Uploads start in parallel with workspace/session preparation. If any
       // earlier step fails, settle that promise and release every staged blob.
       await turnAttachmentsPromise.then(
@@ -8849,8 +8866,10 @@ export default function ChatView({
       resetLocalDispatch();
     };
 
-    await api.orchestration
-      .dispatchCommand({
+    let threadCreated = false;
+    let turnStartedOrReconciling = false;
+    try {
+      await api.orchestration.dispatchCommand({
         type: "thread.create",
         commandId: newCommandId(),
         threadId: nextThreadId,
@@ -8868,73 +8887,87 @@ export default function ChatView({
         associatedWorktreeBranch: activeThreadAssociatedWorktree.associatedWorktreeBranch,
         associatedWorktreeRef: activeThreadAssociatedWorktree.associatedWorktreeRef,
         createdAt,
-      })
-      .then(() => {
-        rememberCustomBinaryPathForDispatch({
-          threadId: nextThreadId,
-          provider: selectedModelSelection.provider,
-          providerOptions: providerOptionsForDispatch,
-        });
-        return api.orchestration.dispatchCommand({
-          type: "thread.turn.start",
-          commandId: newCommandId(),
-          threadId: nextThreadId,
-          message: {
-            messageId: newMessageId(),
-            role: "user",
-            text: outgoingImplementationPrompt,
-            attachments: [],
-          },
-          modelSelection: selectedModelSelection,
-          ...(providerOptionsForDispatch ? { providerOptions: providerOptionsForDispatch } : {}),
-          assistantDeliveryMode,
-          dispatchMode: "queue",
-          runtimeMode,
-          interactionMode: "default",
-          ...(sourceProposedPlan ? { sourceProposedPlan } : {}),
-          createdAt,
-        });
-      })
-      .then(() => {
-        // The turn RPC resolved for a thread this view never made active, so
-        // arm the watchdog marker with that exact thread id before navigation.
+      });
+      threadCreated = true;
+      rememberCustomBinaryPathForDispatch({
+        threadId: nextThreadId,
+        provider: selectedModelSelection.provider,
+        providerOptions: providerOptionsForDispatch,
+      });
+      await api.orchestration.dispatchCommand({
+        type: "thread.turn.start",
+        commandId: newCommandId(),
+        threadId: nextThreadId,
+        message: {
+          messageId: newMessageId(),
+          role: "user",
+          text: outgoingImplementationPrompt,
+          attachments: [],
+        },
+        modelSelection: selectedModelSelection,
+        ...(providerOptionsForDispatch ? { providerOptions: providerOptionsForDispatch } : {}),
+        assistantDeliveryMode,
+        dispatchMode: "queue",
+        runtimeMode,
+        interactionMode: "default",
+        ...(sourceProposedPlan ? { sourceProposedPlan } : {}),
+        createdAt,
+      });
+      turnStartedOrReconciling = true;
+      // This view never made the new thread active, so arm its watchdog before
+      // navigation. A later shell or router failure must not roll the turn back.
+      markPendingTurnDispatch(nextThreadId);
+    } catch (err) {
+      if (threadCreated && isAmbiguousOrchestrationDispatchFailure(err)) {
+        turnStartedOrReconciling = true;
         markPendingTurnDispatch(nextThreadId);
-        return api.orchestration.getShellSnapshot();
-      })
-      .then((snapshot) => {
-        syncServerShellSnapshot(snapshot);
-        // Signal that the plan sidebar should open on the new thread.
-        planSidebarOpenOnNextThreadRef.current = true;
-        return navigate({
-          to: "/$threadId",
-          params: { threadId: nextThreadId },
+        toastManager.add({
+          type: "warning",
+          title: "Connection interrupted after start",
+          description: "Synara is reconnecting and checking the implementation turn.",
         });
-      })
-      .catch(async (err) => {
-        const deletedOnServer = await api.orchestration
-          .dispatchCommand({
-            type: "thread.delete",
-            commandId: newCommandId(),
-            threadId: nextThreadId,
-          })
-          .then(() => true)
-          .catch(() => false);
-        if (deletedOnServer) {
-          clearPendingTurnDispatch(nextThreadId);
-          void reconcileDeletedThreadFromClient({
-            threadId: nextThreadId,
-            removeDeletedThreadFromClientState:
-              useStore.getState().removeDeletedThreadFromClientState,
-          });
-        }
+      } else {
         toastManager.add({
           type: "error",
-          title: "Could not start implementation thread",
+          title: threadCreated
+            ? "Could not start implementation turn"
+            : "Could not create implementation thread",
           description:
             err instanceof Error ? err.message : "An error occurred while creating the new thread.",
         });
-      })
-      .then(finish, finish);
+        finish();
+        return;
+      }
+    }
+
+    try {
+      const snapshot = await api.orchestration.getShellSnapshot();
+      syncServerShellSnapshot(snapshot);
+    } catch {
+      // The durable task can render from the next push/reconnect snapshot.
+    }
+
+    try {
+      if (turnStartedOrReconciling) {
+        // Signal that the plan sidebar should open on the new thread.
+        planSidebarOpenOnNextThreadRef.current = true;
+        await navigate({
+          to: "/$threadId",
+          params: { threadId: nextThreadId },
+        });
+      }
+    } catch {
+      if (turnStartedOrReconciling) {
+        toastManager.add({
+          type: "warning",
+          title: "Implementation started",
+          description:
+            "Synara could not open the new thread automatically. It remains in the sidebar.",
+        });
+      }
+    } finally {
+      finish();
+    }
   }, [
     activeProject,
     activeProposedPlan,

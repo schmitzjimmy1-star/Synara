@@ -97,8 +97,7 @@ const DisabledSkillNames = Schema.Array(Schema.String.check(Schema.isMaxLength(2
   Schema.withDecodingDefault(() => []),
 );
 
-// User-level skill toggles. Skills are keyed by lowercased name because the
-// unified catalog dedupes provider copies of the same skill by name.
+// User-level visibility toggles for the Codex-reported skill catalog.
 export const SkillsServerSettings = Schema.Struct({
   disabled: DisabledSkillNames,
 });

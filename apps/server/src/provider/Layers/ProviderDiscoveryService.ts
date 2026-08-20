@@ -25,7 +25,15 @@ import {
   ProviderDiscoveryService,
   type ProviderDiscoveryServiceShape,
 } from "../Services/ProviderDiscoveryService.ts";
-import { filterDisabledSkills } from "../skillsCatalog.ts";
+
+function filterDisabledSkills(
+  skills: ReadonlyArray<ProviderListSkillsResult["skills"][number]>,
+  disabledNames: ReadonlyArray<string>,
+): ProviderListSkillsResult["skills"] {
+  if (disabledNames.length === 0) return [...skills];
+  const disabled = new Set(disabledNames.map((name) => name.trim().toLowerCase()));
+  return skills.filter((skill) => !disabled.has(skill.name.trim().toLowerCase()));
+}
 
 const decodeInputOrValidationError = <S extends Schema.Top>(input: {
   readonly operation: string;

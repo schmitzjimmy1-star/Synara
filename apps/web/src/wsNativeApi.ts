@@ -52,6 +52,7 @@ import { requireHttpExternalUrl } from "./lib/externalUrl";
 import { WsTransport, type WsThreadStreamFailure } from "./wsTransport";
 import { emitWsCompatibilityIssue, emitWsTransportState } from "./wsTransportEvents";
 import { resolveWsHttpUrl } from "./lib/wsHttpUrl";
+import { isAmbiguousOrchestrationDispatchFailure } from "./lib/orchestrationDispatchRecovery";
 
 export type { WsThreadStreamFailure } from "./wsTransport";
 
@@ -149,12 +150,6 @@ function omitNullUserInputAnswers(
   };
 }
 
-function isRetryableDispatchInterruption(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-  const candidate = error as { readonly code?: unknown; readonly retryable?: unknown };
-  return candidate.code === "WS_REQUEST_RECONNECTED" && candidate.retryable === true;
-}
-
 async function dispatchIdempotentOrchestrationCommand(
   transport: WsTransport,
   command: Parameters<NativeApi["orchestration"]["dispatchCommand"]>[0],
@@ -165,7 +160,7 @@ async function dispatchIdempotentOrchestrationCommand(
       Awaited<ReturnType<NativeApi["orchestration"]["dispatchCommand"]>>
     >(ORCHESTRATION_WS_METHODS.dispatchCommand, input);
   } catch (error) {
-    if (!isRetryableDispatchInterruption(error)) throw error;
+    if (!isAmbiguousOrchestrationDispatchFailure(error)) throw error;
     // Orchestration persists command ids as durable receipts. Reissuing the
     // identical command after a transport swap either observes the original
     // result or executes it once; it must never manufacture a new command id.

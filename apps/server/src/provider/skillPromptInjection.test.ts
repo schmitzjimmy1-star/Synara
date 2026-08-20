@@ -22,10 +22,8 @@ const cursorSkillPath = "/Users/me/.cursor/skills/reviewer/SKILL.md";
 const piSkillPath = "/Users/me/.pi/agent/skills/reviewer/SKILL.md";
 
 describe("shouldInlineSkillForProvider", () => {
-  it("skips codex-native and synara roots for codex but inlines foreign provider roots", () => {
-    // Codex loads .codex roots natively and ~/.synara/skills via the extra
-    // skill root registered at session start.
-    expect(shouldInlineSkillForProvider("codex", synaraSkillPath)).toBe(false);
+  it("skips codex-native roots but inlines retired synara and foreign provider roots", () => {
+    expect(shouldInlineSkillForProvider("codex", synaraSkillPath)).toBe(true);
     expect(shouldInlineSkillForProvider("codex", codexSkillPath)).toBe(false);
     expect(shouldInlineSkillForProvider("codex", claudeSkillPath)).toBe(true);
     expect(shouldInlineSkillForProvider("codex", cursorSkillPath)).toBe(true);
@@ -103,12 +101,7 @@ describe("buildInlineSkillInstructions", () => {
     }
   });
 
-  it("does not inline synara-rooted skills for codex (covered by the extra skill root)", async () => {
-    const text = await buildInlineSkillInstructions({
-      provider: "codex",
-      skills: [{ name: "reviewer", path: synaraSkillPath }],
-      maxChars: 10_000,
-    });
-    expect(text).toBe("");
+  it("recognizes historical synara-rooted skills for codex fallback injection", () => {
+    expect(shouldInlineSkillForProvider("codex", synaraSkillPath)).toBe(true);
   });
 });
