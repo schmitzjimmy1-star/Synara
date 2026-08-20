@@ -921,6 +921,21 @@ export function useComposerSlashCommands(input: {
         return true;
       }
       if (slashInvocation.command === "side") {
+        if (
+          !activeProject ||
+          !activeThread ||
+          !isServerThread ||
+          activeThread.sidechatSourceThreadId
+        ) {
+          toastManager.add({
+            type: "warning",
+            title: "Side is unavailable",
+            description: activeThread?.sidechatSourceThreadId
+              ? "Side cannot start from inside another Side chat."
+              : "Send the first prompt in the main thread before using /side.",
+          });
+          return true;
+        }
         if (!canOfferSideCommand) {
           toastManager.add({
             type: "warning",

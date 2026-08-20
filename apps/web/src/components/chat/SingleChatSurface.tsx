@@ -43,7 +43,7 @@ import type { FileCommentSelection } from "../../lib/fileComments";
 import { gitBranchesQueryOptions } from "../../lib/gitReactQuery";
 import { canComposerHandlePanelWidth } from "../../lib/panelResize";
 import { projectListDirectoriesQueryOptions } from "../../lib/projectReactQuery";
-import { waitForSidechatCreator } from "../../lib/sidechatCreatorRegistry";
+import { getSidechatCreator, subscribeSidechatCreator } from "../../lib/sidechatCreatorRegistry";
 import {
   clearSidechatPaneRetention,
   getSidechatPaneRetentionVersion,
@@ -58,6 +58,7 @@ import {
   type WorkspaceFileOpener,
 } from "../../lib/workspaceFileOpener";
 import { requestExplorerReveal } from "../../explorerRevealRequestStore";
+import { projectScriptRuntimeEnv } from "../../projectScripts";
 import { selectRightDockState, useRightDockStore } from "../../rightDockStore";
 import {
   resolveActivePane,
@@ -82,13 +83,18 @@ import { ChatPaneDropOverlay } from "../chat-drop-overlay/ChatPaneDropOverlay";
 import {
   ChatMountLoader,
   DeferredChatView,
+  LazyAgentBrowserPanel,
   LazyBrowserPanel,
   LazyDiffPanel,
   noopChatSurfaceAction,
 } from "./ChatThreadSurfacePrimitives";
 import { PanelStateMessage } from "./PanelStateMessage";
 import { RightDock } from "./RightDock";
-import { getRightDockPaneMeta, resolveRightDockLauncherItems } from "./rightDockPaneMeta";
+import {
+  getRightDockPaneMeta,
+  resolveRightDockAddMenuKinds,
+  resolveRightDockLauncherItems,
+} from "./rightDockPaneMeta";
 import {
   CHAT_BACKGROUND_CLASS_NAME,
   CHAT_MAIN_CONTENT_SURFACE_CLASS_NAME,
@@ -218,6 +224,35 @@ export function SingleChatSurface(props: {
     threadWorkingDirectory:
       threadWorkspaceMetadata.workingDirectory ?? draftThread?.workingDirectory ?? null,
   });
+  const terminalRuntimeProjectCwd =
+    threadWorkspaceMetadata.workingDirectory ??
+    draftThread?.workingDirectory ??
+    activeProject?.cwd ??
+    workspaceRoot;
+  const terminalWorktreePath =
+    threadWorkspaceMetadata.worktreePath ?? draftThread?.worktreePath ?? null;
+  const terminalRuntimeEnv = terminalRuntimeProjectCwd
+    ? projectScriptRuntimeEnv({
+        project: { cwd: terminalRuntimeProjectCwd },
+        worktreePath: terminalWorktreePath,
+      })
+    : {};
+  const subscribeToSidechatCreator = useCallback(
+    (listener: () => void) => subscribeSidechatCreator(props.threadId, listener),
+    [props.threadId],
+  );
+  const readSidechatCreator = useCallback(
+    () => getSidechatCreator(props.threadId),
+    [props.threadId],
+  );
+  const sidechatCreator = useSyncExternalStore(
+    subscribeToSidechatCreator,
+    readSidechatCreator,
+    readSidechatCreator,
+  );
+  const sidechatUnavailableReason = draftThread
+    ? "Send the first prompt before starting a Side chat"
+    : "Side chat is still loading";
   const dockGitRepositoryQuery = useQuery(gitBranchesQueryOptions(workspaceRoot));
   const hasGitRepository = dockGitRepositoryQuery.data?.isRepo === true;
   const dockDiffTotals = useRepoDiffTotals({
@@ -228,8 +263,15 @@ export function SingleChatSurface(props: {
     hasWorkspace: workspaceRoot !== null,
     hasGitRepository,
     hasReview: dockDiffTotals.fileCount > 0,
+    canStartSidechat: sidechatCreator !== undefined,
+    sidechatUnavailableReason,
   });
-  const availableDockPaneKinds = dockLauncherItems.map(({ kind }) => kind);
+  const availableDockPaneKinds = resolveRightDockAddMenuKinds({
+    hasWorkspace: workspaceRoot !== null,
+    hasGitRepository,
+    hasReview: dockDiffTotals.fileCount > 0,
+    canStartSidechat: sidechatCreator !== undefined,
+  });
   const projects = useStore((store) => store.projects);
   const threadsHydrated = useStore((store) => store.threadsHydrated);
   const { settings: appSettings } = useAppSettings();
@@ -299,9 +341,11 @@ export function SingleChatSurface(props: {
   // chat shell still consumes (diff badge, toggle pressed state, transcript gating).
   const chatPanelState: SplitViewPanePanelState = {
     panel:
-      activePane && (activePane.kind === "browser" || activePane.kind === "diff")
-        ? activePane.kind
-        : null,
+      activePane?.kind === "agentBrowser"
+        ? "browser"
+        : activePane && (activePane.kind === "browser" || activePane.kind === "diff")
+          ? activePane.kind
+          : null,
     diffTurnId: activePane?.kind === "diff" ? activePane.diffTurnId : null,
     diffFilePath: activePane?.kind === "diff" ? activePane.diffFilePath : null,
     hasOpenedPanel: dockState.panes.length > 0,
@@ -313,8 +357,8 @@ export function SingleChatSurface(props: {
     toggleSingletonPane(props.threadId, { kind: "diff" });
   };
   const handleToggleBrowser = () => {
-    requestImmediateDockHydration("browser");
-    toggleSingletonPane(props.threadId, { kind: "browser" });
+    requestImmediateDockHydration("agentBrowser");
+    toggleSingletonPane(props.threadId, { kind: "agentBrowser" });
   };
   const handleToggleRightDock = () => {
     setDockOpen(props.threadId, !dockState.open);
@@ -603,8 +647,8 @@ export function SingleChatSurface(props: {
 
   useBrowserPanelDesktopBridge({
     onToggle: () => {
-      requestImmediateDockHydration("browser");
-      toggleSingletonPane(props.threadId, { kind: "browser" });
+      requestImmediateDockHydration("agentBrowser");
+      toggleSingletonPane(props.threadId, { kind: "agentBrowser" });
     },
     onOpen: (requestedThreadId) => {
       routeSingleBrowserPanelOpenRequest({
@@ -758,28 +802,22 @@ export function SingleChatSurface(props: {
     if (kind === "sidechat") {
       // Sidechat spawns a thread; reuse the composer's /side flow (correct model
       // selection) published via the registry instead of opening an empty pane.
-      void waitForSidechatCreator(props.threadId)
-        .then((createSidechat) => {
-          if (!createSidechat) {
-            toastManager.add({
-              type: "warning",
-              title: "Side chat is unavailable",
-              description: "Open a server-backed main thread before starting a Side chat.",
-            });
-            return;
-          }
-          return createSidechat();
-        })
-        .catch((error) => {
-          toastManager.add({
-            type: "error",
-            title: "Could not start Side chat",
-            description:
-              error instanceof Error
-                ? error.message
-                : "An error occurred while creating Side chat.",
-          });
+      if (!sidechatCreator) {
+        toastManager.add({
+          type: "warning",
+          title: "Side chat is unavailable",
+          description: sidechatUnavailableReason,
         });
+        return;
+      }
+      void sidechatCreator().catch((error) => {
+        toastManager.add({
+          type: "error",
+          title: "Could not start Side chat",
+          description:
+            error instanceof Error ? error.message : "An error occurred while creating Side chat.",
+        });
+      });
       return;
     }
     openPane(props.threadId, { kind });
@@ -790,6 +828,17 @@ export function SingleChatSurface(props: {
     context: { runtimeMode: DockPaneRuntimeMode; isActive: boolean; isVisible: boolean },
   ): ReactNode => {
     switch (pane.kind) {
+      case "agentBrowser":
+        return (
+          <Suspense fallback={<PanelStateMessage>Loading Agent Browser...</PanelStateMessage>}>
+            <LazyAgentBrowserPanel
+              threadId={props.threadId}
+              runtimeMode={context.runtimeMode}
+              isVisible={context.isVisible}
+              onRequestLive={requestActiveDockPaneLive}
+            />
+          </Suspense>
+        );
       case "browser":
         return (
           <Suspense fallback={<PanelStateMessage>Loading browser...</PanelStateMessage>}>
@@ -843,6 +892,9 @@ export function SingleChatSurface(props: {
         if (context.runtimeMode === "preview") {
           return <PanelStateMessage>Terminal is sleeping. Restoring shortly.</PanelStateMessage>;
         }
+        if (!workspaceRoot) {
+          return <PanelStateMessage>Terminal requires an open workspace.</PanelStateMessage>;
+        }
         // Kept mounted across tab switches; visibility toggles the xterm runtime
         // instead of detaching/reattaching it (avoids the open-lag + fit flicker).
         // Also sleep it while the dock is collapsed: a closed dock keeps the pane
@@ -852,7 +904,8 @@ export function SingleChatSurface(props: {
           <Suspense fallback={<PanelStateMessage>Loading terminal...</PanelStateMessage>}>
             <DockTerminalPane
               hostThreadId={props.threadId}
-              projectId={props.projectId}
+              cwd={workspaceRoot}
+              runtimeEnv={terminalRuntimeEnv}
               isActive={context.isActive && dockState.open}
               onClosePanel={() => closePane(props.threadId, pane.id)}
             />

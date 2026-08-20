@@ -238,6 +238,8 @@ import {
 } from "./desktopStorageMigration";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
 import { DesktopAppSnapManager } from "./appSnapManager";
+import { DesktopAgentBrowserManager } from "./agentBrowserManager";
+import { registerAgentBrowserIpcHandlers, sendAgentBrowserEvent } from "./agentBrowserIpc";
 import { hardenBrowserAnnotationWebviewPreferences } from "./browserAnnotations/webviewSecurity";
 import { LOCAL_HTML_PREVIEW_SCHEME } from "./localHtmlPreviewProtocol";
 import {
@@ -399,6 +401,11 @@ const browserManager = new DesktopBrowserManager({
     return target ? handleDesktopPhysicalZoomShortcut(event, input, target) : false;
   },
 });
+const agentBrowserManager = new DesktopAgentBrowserManager({
+  env: process.env,
+  resourcesPath: process.resourcesPath,
+  cwd: app.isPackaged ? OS.homedir() : ROOT_DIR,
+});
 let appSnapManager: DesktopAppSnapManager | null = null;
 let configuredUpdaterCacheDirName: string | null = null;
 
@@ -412,6 +419,10 @@ browserManager.subscribeCopyLink((event) => {
 
 browserManager.subscribeAnnotationEvents((event) => {
   sendBrowserAnnotationEvent(mainWindow?.webContents, event);
+});
+
+agentBrowserManager.subscribe((event) => {
+  sendAgentBrowserEvent(mainWindow?.webContents, event);
 });
 
 function startBrowserPerformanceLogging(): void {
@@ -3829,6 +3840,7 @@ async function shutdownDesktopRuntime(reason: string): Promise<void> {
       cancelBackendReadinessWait();
       appSnapManager?.dispose();
       appSnapManager = null;
+      await agentBrowserManager.dispose();
       browserManager.dispose();
       restoreStdIoCapture?.();
       desktopShutdownComplete = true;
@@ -4220,6 +4232,7 @@ function registerIpcHandlers(): void {
   registerDesktopVoiceTranscriptionHandler();
   startBrowserPerformanceLogging();
   registerBrowserIpcHandlers(ipcMain, browserManager);
+  registerAgentBrowserIpcHandlers(ipcMain, agentBrowserManager);
 }
 
 function getIconOption(): { icon: string } | Record<string, never> {

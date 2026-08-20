@@ -100,6 +100,10 @@
       "types": "./src/browserSession.ts",
       "import": "./src/browserSession.ts"
     },
+    "./agentBrowser": {
+      "types": "./src/agentBrowser.ts",
+      "import": "./src/agentBrowser.ts"
+    },
     "./conversationEdit": {
       "types": "./src/conversationEdit.ts",
       "import": "./src/conversationEdit.ts"

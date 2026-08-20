@@ -32,16 +32,19 @@ export interface RightDockPaneMeta {
 
 export interface RightDockLauncherItem extends RightDockPaneMeta {
   kind: RightDockPaneKind;
+  disabled?: boolean;
+  unavailableReason?: string;
 }
 
 export const RIGHT_DOCK_PANE_META: Record<RightDockPaneKind, RightDockPaneMeta> = {
-  browser: { label: "Browser", Icon: GlobeIcon },
-  diff: { label: "Diff", Icon: DiffIcon },
-  explorer: { label: "Explorer", Icon: FoldersIcon },
+  agentBrowser: { label: "Browser", Icon: GlobeIcon },
+  browser: { label: "Manual Browser", Icon: GlobeIcon },
+  diff: { label: "Review", Icon: DiffIcon },
+  explorer: { label: "Files", Icon: FoldersIcon },
   file: { label: "File", Icon: FileIcon },
   terminal: { label: "Terminal", Icon: TerminalIcon },
-  sidechat: { label: "Side chats", Icon: MessageCircleIcon },
-  git: { label: "Git", Icon: GitCommitIcon },
+  sidechat: { label: "Side chat", Icon: MessageCircleIcon },
+  git: { label: "Source control", Icon: GitCommitIcon },
   pullRequest: { label: "Pull request", Icon: GitPullRequestIcon },
 };
 
@@ -75,42 +78,53 @@ export const RIGHT_DOCK_ADD_MENU_KINDS: readonly RightDockPaneKind[] = RIGHT_DOC
 const RIGHT_DOCK_LAUNCHER_ORDER: readonly RightDockPaneKind[] = [
   "diff",
   "terminal",
-  "browser",
+  "agentBrowser",
   "explorer",
   "sidechat",
-  "git",
 ];
-
-const RIGHT_DOCK_LAUNCHER_LABELS: Partial<Record<RightDockPaneKind, string>> = {
-  diff: "Review",
-  explorer: "Files",
-  sidechat: "Side chats",
-  git: "Source control",
-};
 
 export function resolveRightDockLauncherItems(input: {
   hasWorkspace: boolean;
   hasGitRepository: boolean;
   hasReview: boolean;
+  canStartSidechat: boolean;
+  sidechatUnavailableReason: string;
 }): readonly RightDockLauncherItem[] {
-  return RIGHT_DOCK_LAUNCHER_ORDER.flatMap((kind) => {
-    if (kind === "diff" && !input.hasReview) {
-      return [];
-    }
-    if (kind === "git" && !input.hasGitRepository) {
-      return [];
-    }
-    if (kind === "explorer" && !input.hasWorkspace) {
-      return [];
-    }
+  return RIGHT_DOCK_LAUNCHER_ORDER.map((kind) => {
     const meta = getRightDockPaneMeta(kind);
-    return [
-      {
-        kind,
-        Icon: meta.Icon,
-        label: RIGHT_DOCK_LAUNCHER_LABELS[kind] ?? meta.label,
-      },
-    ];
+    const unavailableReason =
+      kind === "diff" && !input.hasReview
+        ? input.hasGitRepository
+          ? "No changes to review"
+          : "Review requires a Git repository"
+        : kind === "explorer" && !input.hasWorkspace
+          ? "Files require an open workspace"
+          : kind === "terminal" && !input.hasWorkspace
+            ? "Terminal requires an open workspace"
+            : kind === "sidechat" && !input.canStartSidechat
+              ? input.sidechatUnavailableReason
+              : undefined;
+    return {
+      kind,
+      Icon: meta.Icon,
+      label: meta.label,
+      ...(unavailableReason ? { disabled: true, unavailableReason } : {}),
+    };
+  });
+}
+
+export function resolveRightDockAddMenuKinds(input: {
+  hasWorkspace: boolean;
+  hasGitRepository: boolean;
+  hasReview: boolean;
+  canStartSidechat: boolean;
+}): readonly RightDockPaneKind[] {
+  return RIGHT_DOCK_ADD_MENU_KINDS.filter((kind) => {
+    if (kind === "explorer" || kind === "terminal") return input.hasWorkspace;
+    if (kind === "diff") return input.hasReview;
+    if (kind === "git") return input.hasGitRepository;
+    if (kind === "sidechat") return input.canStartSidechat;
+    return true;
   });
 }
 
