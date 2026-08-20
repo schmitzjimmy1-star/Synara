@@ -54,6 +54,7 @@ export function providerStartOptionsFromServerSettings(
     codex: {
       ...(providers.codex.binaryPath ? { binaryPath: providers.codex.binaryPath } : {}),
       ...(providers.codex.homePath ? { homePath: providers.codex.homePath } : {}),
+      ...(providers.codex.profile ? { profile: providers.codex.profile } : {}),
     },
     claudeAgent: {
       ...(providers.claudeAgent.binaryPath ? { binaryPath: providers.claudeAgent.binaryPath } : {}),

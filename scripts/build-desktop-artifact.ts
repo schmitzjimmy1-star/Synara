@@ -1173,7 +1173,15 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       });
     }
     const outputAppBundle = path.join(options.outputDir, path.basename(appBundles[0]!));
-    yield* fs.copy(appBundles[0]!, outputAppBundle);
+    // FileSystem.copy resolves framework symlinks into absolute paths. Those
+    // links break as soon as the temporary electron-builder stage is removed,
+    // leaving an app that cannot pass codesign verification. ditto preserves
+    // the relative framework links used by macOS application bundles.
+    yield* runCommand(
+      ChildProcess.make({
+        ...commandOutputOptions(options.verbose),
+      })`/usr/bin/ditto ${appBundles[0]!} ${outputAppBundle}`,
+    );
     copiedArtifacts.push(outputAppBundle);
   }
   for (const entry of stageEntries) {
