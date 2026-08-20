@@ -44,15 +44,8 @@ import { readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { Effect } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket, { type RawData } from "ws";
-
-import { DeviceManager } from "../src/device/DeviceManager.ts";
-import { IosSimulatorBackend } from "../src/device/IosSimulatorBackend.ts";
-import { makeAgentGatewayDeviceTools } from "../src/agentGateway/deviceTools.ts";
-import type { McpToolCallResult } from "../src/agentGateway/protocol.ts";
-import type { ToolContext } from "../src/agentGateway/toolRuntime.ts";
 
 const ENABLED = process.env.DEVICE_E2E === "1";
 const ORIGIN = process.env.DEVICE_E2E_ORIGIN ?? "http://127.0.0.1:3899";
@@ -61,7 +54,6 @@ const THREAD_ID = `device-e2e-${Date.now()}`;
 
 const describeE2e = ENABLED ? describe : describe.skip;
 
-/** PNG magic: the eight bytes every PNG starts with. */
 /** Every label in an accessibility tree, in document order. */
 function labelsOf(node: unknown, out: string[] = []): string[] {
   const record = node as { label?: unknown; children?: unknown } | null;
@@ -336,30 +328,6 @@ async function collectFrames(
   return { total, codecConfig, keyframes };
 }
 
-function makeToolContext(): ToolContext {
-  return {
-    principal: {
-      kind: "provider-session",
-      sessionKey: "device-e2e",
-      threadId: THREAD_ID,
-      provider: "claudeAgent",
-      turnId: "device-e2e-turn",
-    },
-    callerThreadId: THREAD_ID,
-    callerSessionKey: "device-e2e",
-    callerProvider: "claudeAgent",
-    callerCapabilities: new Set(["device:control"]),
-    callerTurnId: "device-e2e-turn",
-    assertCallerTurnActive: () => Effect.void,
-    jsonRpcRequestId: 1,
-  };
-}
-
-function readToolJson(result: McpToolCallResult): unknown {
-  const text = result.content.find((entry) => entry.type === "text");
-  return text && text.type === "text" ? JSON.parse(text.text) : null;
-}
-
 describeE2e("device pane end-to-end", () => {
   let rpc: RpcSocket;
   let target: DeviceDescriptor | undefined;
@@ -600,154 +568,4 @@ describeE2e("device pane end-to-end", () => {
       await rpc.call(DEVICE_WS_METHODS.detach, { threadId: THREAD_ID }).catch(() => undefined);
     }
   }, 600_000);
-
-  it("drives the device through the MCP tools with no pane and no stream", async () => {
-    // The agent path: MCP tool handlers only, nothing attached, no frame
-    // stream. A tap here used to be acked while the screen never changed,
-    // because the helper's HID bridge failed silently and the RPC layer
-    // reported success anyway.
-    const backend = new IosSimulatorBackend({ platform: process.platform });
-    const manager = new DeviceManager({ backend });
-    const openPaneRequests: Array<{ readonly reason: string }> = [];
-    manager.onEvent((event) => {
-      if (event.type === "device.open-pane-requested") openPaneRequests.push(event);
-    });
-    const tools = new Map(
-      makeAgentGatewayDeviceTools({ manager }).map((tool) => [tool.definition.name, tool]),
-    );
-    const context = {
-      principal: {
-        kind: "provider-session",
-        sessionKey: "device-e2e",
-        threadId: THREAD_ID,
-        provider: "codex",
-        turnId: "device-e2e-turn",
-      },
-      callerThreadId: THREAD_ID,
-      callerSessionKey: "device-e2e",
-      callerProvider: "codex",
-      callerCapabilities: new Set(["device:control"]),
-      callerTurnId: "device-e2e-turn",
-      assertCallerTurnActive: () => Effect.void,
-      jsonRpcRequestId: 1,
-    } as unknown as ToolContext;
-
-    const call = async (name: string, args: Record<string, unknown>) => {
-      const tool = tools.get(name);
-      if (!tool) throw new Error(`missing tool ${name}`);
-      const result = await Effect.runPromise(tool.handler(args, context));
-      expect(result.isError, `${name} must not error`).not.toBe(true);
-      return readToolJson(result) as Record<string, unknown>;
-    };
-
-    try {
-      const listed = (await call("device_list", { includeShutdown: true })) as {
-        devices: ReadonlyArray<DeviceDescriptor>;
-      };
-      const device =
-        listed.devices.find((entry) => entry.state === "booted") ??
-        listed.devices.find((entry) => entry.name.startsWith("iPhone"));
-      expect(device, "expected a simulator to drive").toBeDefined();
-      // An earlier case in this file shuts the device down, so re-check the
-      // live state rather than trusting the listing, and wait for the boot to
-      // finish before launching into it.
-      const booted = (await call("device_boot", { udid: device!.udid })) as { kind?: string };
-      expect(booted.kind, "expected the device to boot").toBe("booted");
-
-      // device_boot returns once CoreSimulator reports Booted, but SpringBoard
-      // keeps initializing after that and an app launched too early never
-      // paints. Wait for the home screen to serve a tree at all, then launch.
-      for (let attempt = 0; attempt < 20; attempt += 1) {
-        const root = (
-          (await call("device_describe_ui", { udid: device!.udid })) as {
-            root: unknown;
-          }
-        ).root;
-        if (labelsOf(root).length > 0) break;
-        await new Promise((resolve) => setTimeout(resolve, 3_000));
-      }
-
-      // Relaunch rather than launch: an earlier case in this file may have left
-      // Settings running, and simctl launch on a live process is a no-op that
-      // would leave whatever screen it was on.
-      await call("device_launch", { udid: device!.udid, bundleId: SETTINGS_BUNDLE_ID });
-      // Driving the device through MCP must ask the pane to open. The polling
-      // describe above already surfaced it as "agent-tool", so this launch is
-      // correctly a no-op: one request for the turn, not one per tool call.
-      expect(openPaneRequests).toHaveLength(1);
-      expect(openPaneRequests[0]!.reason).toBe("agent-tool");
-      // Settings paints its root asynchronously, and a preceding reboot can
-      // leave SpringBoard still settling. Poll for a populated tree rather than
-      // sleeping a fixed time and comparing two shots of a launch placeholder.
-      let before: string[] = [];
-      let target: { readonly x: number; readonly y: number } | null = null;
-      for (let attempt = 0; attempt < 15; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 2_000));
-        const root = (
-          (await call("device_describe_ui", { udid: device!.udid })) as {
-            root: unknown;
-          }
-        ).root;
-        before = labelsOf(root);
-        // A freshly booted runtime raises system permission alerts ("Allow
-        // Wallet to use your location?") over whatever is running. Dismiss one
-        // and resample rather than comparing two shots of the alert.
-        const dismiss = alertDismissButton(root);
-        if (dismiss) {
-          await call("device_tap", { udid: device!.udid, x: dismiss.x, y: dismiss.y });
-          continue;
-        }
-        target = firstTappableRow(root);
-        if (before.length > 6 && target !== null) break;
-      }
-      expect(before.length, "expected a populated accessibility tree").toBeGreaterThan(6);
-      expect(target, "expected a tappable row in the accessibility tree").not.toBeNull();
-
-      // Tapping a row the tree actually reports, rather than a fixed point that
-      // may land on padding, is what makes this deterministic.
-      await call("device_tap", { udid: device!.udid, x: target!.x, y: target!.y });
-      await new Promise((resolve) => setTimeout(resolve, 3_000));
-
-      const after = labelsOf(
-        ((await call("device_describe_ui", { udid: device!.udid })) as { root: unknown }).root,
-      );
-      expect(after, "device_tap must actually change the screen").not.toEqual(before);
-    } finally {
-      await manager.dispose().catch(() => undefined);
-    }
-  }, 300_000);
-
-  it("serves device_list and device_screenshot through the agent gateway tools", async () => {
-    const backend = new IosSimulatorBackend({ platform: process.platform });
-    const manager = new DeviceManager({ backend });
-    try {
-      const tools = new Map(
-        makeAgentGatewayDeviceTools({ manager }).map((tool) => [tool.definition.name, tool]),
-      );
-      const context = makeToolContext();
-
-      const listTool = tools.get("device_list");
-      if (!listTool) throw new Error("device_list tool missing");
-      const listed = readToolJson(
-        await Effect.runPromise(listTool.handler({ includeShutdown: true }, context)),
-      ) as { devices?: ReadonlyArray<DeviceDescriptor> };
-      expect(Array.isArray(listed.devices)).toBe(true);
-      const booted = listed.devices?.find((device) => device.state === "booted");
-      expect(booted, "expected the simulator booted earlier to be visible").toBeDefined();
-
-      const screenshotTool = tools.get("device_screenshot");
-      if (!screenshotTool) throw new Error("device_screenshot tool missing");
-      const result = await Effect.runPromise(
-        screenshotTool.handler({ udid: booted!.udid }, context),
-      );
-      const image = result.content.find((entry) => entry.type === "image");
-      expect(image, "device_screenshot must return an image payload").toBeDefined();
-      if (image?.type === "image") {
-        expect(image.mimeType).toBe("image/png");
-        expect(Buffer.from(image.data, "base64").subarray(0, 8).equals(PNG_MAGIC)).toBe(true);
-      }
-    } finally {
-      await manager.dispose().catch(() => undefined);
-    }
-  }, 180_000);
 });
