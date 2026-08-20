@@ -104,7 +104,6 @@ import { getProviderUsageSnapshot } from "./providerUsageSnapshot";
 import { ProfileStatsQuery } from "./profileStats";
 import { redactSensitiveProcessArgs } from "./processArgumentRedaction";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment";
-import { ExternalMcpService } from "./externalMcp/Services/ExternalMcpService";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup";
 import { ServerSettingsService } from "./serverSettings";
@@ -127,7 +126,6 @@ import { ThreadDiagnosticsQuery } from "./diagnostics/Services/ThreadDiagnostics
 import { makeWsRequestAdmission } from "./wsRequestAdmission";
 import { voiceUploadAdmissionGate } from "./voiceUploadAdmission";
 import {
-  CurrentWsSessionRole,
   provideWsConnectionSession,
   WS_CONNECTION_SESSION_HEADER,
   WsConnectionSessions,
@@ -156,10 +154,6 @@ import {
   GitHubProjectProvisioningError,
   makeGitHubProjectProvisioner,
 } from "./project/githubProjectProvisioning";
-
-export function canManageExternalMcp(role: "owner" | "client"): boolean {
-  return role === "owner";
-}
 
 const MAX_DIAGNOSTIC_CHILD_PROCESSES = 80;
 const MAX_DIAGNOSTIC_ARGS_CHARS = 500;
@@ -338,7 +332,6 @@ const makeWsRpcHandlersLayer = () =>
       const config = yield* ServerConfig;
       const devServerManager = yield* DevServerManager;
       const fileSystem = yield* FileSystem.FileSystem;
-      const externalMcp = yield* ExternalMcpService;
       const git = yield* GitCore;
       const github = yield* GitHubCli;
       const gitManager = yield* GitManager;
@@ -836,21 +829,6 @@ const makeWsRpcHandlersLayer = () =>
                 )?.id ?? null,
             ),
           );
-
-      const requireOwner = Effect.gen(function* () {
-        if (!canManageExternalMcp(yield* CurrentWsSessionRole)) {
-          return yield* Effect.fail(
-            new WsRpcError({ message: "Owner authorization is required for this operation." }),
-          );
-        }
-        if (!isLoopbackHost(config.host) || config.publicUrl !== undefined) {
-          return yield* Effect.fail(
-            new WsRpcError({
-              message: "External MCP management is available only on a loopback-only instance.",
-            }),
-          );
-        }
-      });
 
       return AdmittedWsFeatureRpcGroup.of({
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
@@ -1633,29 +1611,6 @@ const makeWsRpcHandlersLayer = () =>
             "Failed to refresh providers",
           ),
         [WS_METHODS.serverUpdateProvider]: (input) => providerHealth.updateProvider(input),
-        [WS_METHODS.serverListExternalMcpIntegrations]: () =>
-          rpcEffect(
-            requireOwner.pipe(Effect.andThen(externalMcp.listIntegrations())),
-            "Failed to list external MCP integrations",
-          ),
-        [WS_METHODS.serverCreateExternalMcpIntegration]: (input) =>
-          rpcEffect(
-            requireOwner.pipe(Effect.andThen(externalMcp.createIntegration(input))),
-            "Failed to create external MCP integration",
-          ),
-        [WS_METHODS.serverRevokeExternalMcpIntegration]: (input) =>
-          rpcEffect(
-            requireOwner.pipe(
-              Effect.andThen(externalMcp.revokeIntegration(input.integrationId)),
-              Effect.map((revoked) => ({ revoked })),
-            ),
-            "Failed to revoke external MCP integration",
-          ),
-        [WS_METHODS.serverRefreshExternalMcpPairing]: (input) =>
-          rpcEffect(
-            requireOwner.pipe(Effect.andThen(externalMcp.refreshPairing(input))),
-            "Failed to refresh external MCP pairing",
-          ),
         [WS_METHODS.serverListWorktrees]: () =>
           rpcEffect(
             pruneManagedWorktrees.pipe(Effect.map((worktrees) => ({ worktrees }))),

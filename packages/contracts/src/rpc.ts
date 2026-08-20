@@ -24,13 +24,6 @@ import {
 } from "./automation";
 import { OpenInEditorInput } from "./editor";
 import {
-  ExternalMcpCreateIntegrationInput,
-  ExternalMcpCreateIntegrationResult,
-  ExternalMcpIntegration,
-  ExternalMcpRefreshPairingInput,
-  ExternalMcpRevokeIntegrationInput,
-} from "./externalMcp";
-import {
   DEVICE_WS_METHODS,
   DeviceAttachInput,
   DeviceBootInput,
@@ -932,42 +925,6 @@ export const WsServerUpdateProviderRpc = Rpc.make(WS_METHODS.serverUpdateProvide
   error: ServerProviderUpdateError,
 });
 
-export const WsServerListExternalMcpIntegrationsRpc = Rpc.make(
-  WS_METHODS.serverListExternalMcpIntegrations,
-  {
-    payload: Schema.Struct({}),
-    success: Schema.Array(ExternalMcpIntegration),
-    error: WsRpcError,
-  },
-);
-
-export const WsServerCreateExternalMcpIntegrationRpc = Rpc.make(
-  WS_METHODS.serverCreateExternalMcpIntegration,
-  {
-    payload: ExternalMcpCreateIntegrationInput,
-    success: ExternalMcpCreateIntegrationResult,
-    error: WsRpcError,
-  },
-);
-
-export const WsServerRevokeExternalMcpIntegrationRpc = Rpc.make(
-  WS_METHODS.serverRevokeExternalMcpIntegration,
-  {
-    payload: ExternalMcpRevokeIntegrationInput,
-    success: Schema.Struct({ revoked: Schema.Boolean }),
-    error: WsRpcError,
-  },
-);
-
-export const WsServerRefreshExternalMcpPairingRpc = Rpc.make(
-  WS_METHODS.serverRefreshExternalMcpPairing,
-  {
-    payload: ExternalMcpRefreshPairingInput,
-    success: ExternalMcpCreateIntegrationResult,
-    error: WsRpcError,
-  },
-);
-
 export const WsServerListWorktreesRpc = Rpc.make(WS_METHODS.serverListWorktrees, {
   payload: Schema.Struct({}),
   success: ServerListWorktreesResult,
@@ -1289,10 +1246,6 @@ export const WsFeatureRpcGroup = RpcGroup.make(
   WsServerUpdateSettingsRpc,
   WsServerRefreshProvidersRpc,
   WsServerUpdateProviderRpc,
-  WsServerListExternalMcpIntegrationsRpc,
-  WsServerCreateExternalMcpIntegrationRpc,
-  WsServerRevokeExternalMcpIntegrationRpc,
-  WsServerRefreshExternalMcpPairingRpc,
   WsServerListWorktreesRpc,
   WsServerListLocalServersRpc,
   WsServerStopLocalServerRpc,

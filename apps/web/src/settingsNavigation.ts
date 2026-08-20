@@ -16,7 +16,6 @@ export const SETTINGS_SECTION_IDS = [
   "providers",
   "skills",
   "usage",
-  "integrations",
   "advanced",
 ] as const;
 
@@ -110,14 +109,6 @@ export const SETTINGS_NAV_ITEMS: readonly SettingsNavItem[] = [
     description: "Capture another app's frontmost window directly into a task.",
     icon: "screen-capture",
     eyebrow: "Screen capture",
-  },
-  {
-    id: "integrations",
-    group: "integrations",
-    label: "MCP connections",
-    description: "Give Codex, Claude, and other local agents scoped access to Synara tasks.",
-    icon: "plugin-1",
-    eyebrow: "External agents",
   },
   {
     id: "providers",

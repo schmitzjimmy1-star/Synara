@@ -1,10 +1,20 @@
 import type { ProviderKind, ThreadId } from "@synara/contracts";
 import { Effect, Exit } from "effect";
 
-import type {
-  AgentGatewayCredentialsShape,
-  AgentGatewayMcpConnection,
-} from "./Services/AgentGatewayCredentials.ts";
+interface AgentGatewayMcpConnection {
+  readonly url: string;
+  readonly bearerToken: string;
+}
+
+interface AgentGatewayCredentialsShape {
+  readonly connectionForThread: (
+    threadId: ThreadId,
+    provider: ProviderKind,
+  ) => AgentGatewayMcpConnection;
+  readonly revokeSessionToken: (token: string) => void;
+  readonly cancelSessionTurnRequests: (token: string, turnId: string) => Promise<void>;
+  readonly retireSessionTurn: (token: string, turnId: string) => Promise<void>;
+}
 
 type AgentGatewaySessionLeaseCredentials = Pick<
   AgentGatewayCredentialsShape,
