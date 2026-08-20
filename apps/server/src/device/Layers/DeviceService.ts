@@ -19,6 +19,8 @@ import { DeviceService, type DeviceServiceShape } from "../Services/DeviceServic
 
 export interface DeviceServiceLiveOptions {
   readonly platform?: NodeJS.Platform;
+  /** Enables the iOS backend. The lean runtime keeps this false. */
+  readonly enabled?: boolean;
   /** Where to remember this run's boots; omit to remember nothing. */
   readonly bootOwnershipPath?: string;
 }
@@ -42,10 +44,11 @@ export function makeDeviceServiceLayer(options: DeviceServiceLiveOptions = {}) {
     DeviceService,
     Effect.gen(function* () {
       const platform = options.platform ?? process.platform;
-      const backend = new IosSimulatorBackend({ platform });
+      const supported = options.enabled !== false && platform === "darwin";
+      const backend = new IosSimulatorBackend({ platform: supported ? platform : "linux" });
       // Only darwin can boot anything, so only darwin needs to remember doing so.
       const bootOwnership =
-        platform === "darwin"
+        supported
           ? makeBootOwnershipStore(options.bootOwnershipPath ?? defaultBootOwnershipPath())
           : NULL_BOOT_OWNERSHIP;
       const manager = new DeviceManager({ backend, bootOwnership });
@@ -53,7 +56,7 @@ export function makeDeviceServiceLayer(options: DeviceServiceLiveOptions = {}) {
       // A previous run that crashed left its simulators booted and no longer
       // owned by anyone: reclaim them before this run starts counting boots,
       // or they linger forever outside the cap and the idle sweep.
-      if (platform === "darwin") {
+      if (supported) {
         yield* Effect.promise(async () => {
           const reclaimed = await manager.reclaimOrphanedBoots().catch(() => []);
           if (reclaimed.length > 0) {
@@ -68,9 +71,9 @@ export function makeDeviceServiceLayer(options: DeviceServiceLiveOptions = {}) {
       // App quit shuts down every simulator Synara booted and leaves the
       // user's own devices running.
       yield* Effect.addFinalizer(() => Effect.promise(() => manager.dispose()));
-      return { supported: platform === "darwin", manager } satisfies DeviceServiceShape;
+      return { supported, manager } satisfies DeviceServiceShape;
     }),
   );
 }
 
-export const DeviceServiceLive = makeDeviceServiceLayer();
+export const DeviceServiceLive = makeDeviceServiceLayer({ enabled: false });

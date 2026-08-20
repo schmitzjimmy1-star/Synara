@@ -37,7 +37,6 @@ import { Effect, FileSystem, Layer, Option, Path, Queue, Schema, Scope, Stream }
 import { Headers, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { RpcMiddleware, RpcSchema, RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
-import { AutomationService } from "./automation/Services/AutomationService";
 import { authErrorResponse, makeEffectAuthRequest } from "./auth/effectHttp";
 import {
   ServerAuth,
@@ -337,7 +336,6 @@ const makeWsRpcHandlersLayer = () =>
   AdmittedWsFeatureRpcGroup.toLayer(
     Effect.gen(function* () {
       const checkpointDiffQuery = yield* CheckpointDiffQuery;
-      const automationService = yield* AutomationService;
       const config = yield* ServerConfig;
       const devServerManager = yield* DevServerManager;
       const fileSystem = yield* FileSystem.FileSystem;
@@ -1770,24 +1768,10 @@ const makeWsRpcHandlersLayer = () =>
             }),
             "Failed to generate thread recap",
           ),
-        [WS_METHODS.serverGenerateAutomationIntent]: (input) =>
+        [WS_METHODS.serverGenerateAutomationIntent]: () =>
           rpcEffect(
-            Effect.gen(function* () {
-              const settings = yield* serverSettings.getSettings;
-              const modelSelection =
-                input.textGenerationModelSelection ?? settings.textGenerationModelSelection;
-              return yield* textGeneration.generateAutomationIntent({
-                cwd: input.cwd,
-                message: input.message,
-                ...(input.defaultMode ? { defaultMode: input.defaultMode } : {}),
-                nowIso: input.nowIso,
-                ...(input.codexHomePath ? { codexHomePath: input.codexHomePath } : {}),
-                model: input.textGenerationModel ?? modelSelection.model,
-                modelSelection,
-                ...(input.providerOptions ? { providerOptions: input.providerOptions } : {}),
-              });
-            }),
-            "Failed to generate automation intent",
+            Effect.fail(new Error("Automations are not available in this build.")),
+            "Automations are not available in this build",
           ),
         [WS_METHODS.serverUpsertKeybinding]: (input) =>
           rpcEffect(
@@ -1942,47 +1926,62 @@ const makeWsRpcHandlersLayer = () =>
           rpcEffect(providerDiscoveryService.listModels(input), "Failed to list models"),
         [WS_METHODS.providerListAgents]: (input) =>
           rpcEffect(providerDiscoveryService.listAgents(input), "Failed to list agents"),
-        [WS_METHODS.automationList]: (input) =>
-          rpcEffect(automationService.list(input), "Failed to list automations"),
-        [WS_METHODS.automationGetMemory]: ({ automationId }) =>
-          rpcEffect(automationService.getMemory(automationId), "Failed to load automation memory"),
-        [WS_METHODS.automationCreate]: (input) =>
-          rpcEffect(automationService.create(input), "Failed to create automation"),
-        [WS_METHODS.automationUpdate]: (input) =>
-          rpcEffect(automationService.update(input), "Failed to update automation"),
-        [WS_METHODS.automationDelete]: (input) =>
-          rpcEffect(automationService.delete(input), "Failed to delete automation"),
-        [WS_METHODS.automationRunNow]: (input) =>
-          rpcEffect(automationService.runNow(input), "Failed to run automation"),
-        [WS_METHODS.automationCancelRun]: (input) =>
-          rpcEffect(automationService.cancelRun(input), "Failed to cancel automation run"),
-        [WS_METHODS.automationMarkRunRead]: (input) =>
-          rpcEffect(automationService.markRunRead(input), "Failed to update automation run"),
-        [WS_METHODS.automationArchiveRun]: (input) =>
-          rpcEffect(automationService.archiveRun(input), "Failed to update automation run"),
-        [WS_METHODS.automationResolveProposal]: (input) =>
+        [WS_METHODS.automationList]: () =>
           rpcEffect(
-            automationService.resolveProposal(input),
-            "Failed to resolve automation proposal",
+            Effect.fail(new Error("Automations are not available in this build.")),
+            "Automations are not available in this build",
+          ),
+        [WS_METHODS.automationGetMemory]: () =>
+          rpcEffect(
+            Effect.fail(new Error("Automations are not available in this build.")),
+            "Automations are not available in this build",
+          ),
+        [WS_METHODS.automationCreate]: () =>
+          rpcEffect(
+            Effect.fail(new Error("Automations are not available in this build.")),
+            "Automations are not available in this build",
+          ),
+        [WS_METHODS.automationUpdate]: () =>
+          rpcEffect(
+            Effect.fail(new Error("Automations are not available in this build.")),
+            "Automations are not available in this build",
+          ),
+        [WS_METHODS.automationDelete]: () =>
+          rpcEffect(
+            Effect.fail(new Error("Automations are not available in this build.")),
+            "Automations are not available in this build",
+          ),
+        [WS_METHODS.automationRunNow]: () =>
+          rpcEffect(
+            Effect.fail(new Error("Automations are not available in this build.")),
+            "Automations are not available in this build",
+          ),
+        [WS_METHODS.automationCancelRun]: () =>
+          rpcEffect(
+            Effect.fail(new Error("Automations are not available in this build.")),
+            "Automations are not available in this build",
+          ),
+        [WS_METHODS.automationMarkRunRead]: () =>
+          rpcEffect(
+            Effect.fail(new Error("Automations are not available in this build.")),
+            "Automations are not available in this build",
+          ),
+        [WS_METHODS.automationArchiveRun]: () =>
+          rpcEffect(
+            Effect.fail(new Error("Automations are not available in this build.")),
+            "Automations are not available in this build",
+          ),
+        [WS_METHODS.automationResolveProposal]: () =>
+          rpcEffect(
+            Effect.fail(new Error("Automations are not available in this build.")),
+            "Automations are not available in this build",
           ),
         [WS_METHODS.subscribeAutomationEvents]: (_, { clientId }) =>
           streamAdmission.guard(
             clientId,
             { key: "automation.events" },
-            Stream.merge(
-              Stream.fromEffect(
-                automationService.list({}).pipe(
-                  Effect.map(({ definitions, runs, memories }) => ({
-                    type: "snapshot" as const,
-                    definitions,
-                    runs,
-                    memories,
-                  })),
-                ),
-              ),
-              automationService.streamEvents,
-            ).pipe(
-              Stream.mapError((cause) => toWsRpcError(cause, "Automation event stream failed")),
+            Stream.fail(
+              new WsRpcError({ message: "Automations are not available in this build." }),
             ),
           ),
 

@@ -7,6 +7,15 @@ const StringSetting = TrimmedString.check(Schema.isMaxLength(4096));
 const CustomModels = Schema.Array(Schema.String.check(Schema.isMaxLength(256))).pipe(
   Schema.withDecodingDefault(() => []),
 );
+export const OPENROUTER_CODEX_MODELS = [
+  "openai/gpt-5.6-sol",
+  "anthropic/claude-sonnet-5",
+  "anthropic/claude-haiku-4.5",
+  "deepseek/deepseek-v4-pro",
+  "deepseek/deepseek-v4-flash-0731",
+  "qwen/qwen3.8-max",
+] as const;
+export const OPENROUTER_CODEX_DEFAULT_MODEL = OPENROUTER_CODEX_MODELS[0];
 
 const ProviderSettingsBase = {
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
@@ -18,6 +27,7 @@ export const CodexServerProviderSettings = Schema.Struct({
   ...ProviderSettingsBase,
   binaryPath: StringSetting.pipe(Schema.withDecodingDefault(() => "codex")),
   homePath: StringSetting.pipe(Schema.withDecodingDefault(() => "")),
+  customModels: CustomModels,
 });
 export type CodexServerProviderSettings = typeof CodexServerProviderSettings.Type;
 

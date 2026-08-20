@@ -5,8 +5,6 @@ import {
   MAC_APPSNAP_HELPER_ASAR_EXCLUSION,
   MAC_APPSNAP_HELPER_BUNDLE_PATH,
   MAC_APPSNAP_HELPER_STAGE_PATH,
-  MAC_DEVICE_HELPER_RESOURCE_PATH,
-  MAC_DEVICE_HELPER_STAGE_PATH,
   MAC_ENTITLEMENTS_PATH,
   MAC_INHERITED_ENTITLEMENTS_PATH,
   MICROPHONE_USAGE_DESCRIPTION,
@@ -49,10 +47,6 @@ describe("createDesktopPlatformBuildConfig", () => {
       {
         from: "apps/desktop/native/appsnap/build/synara-appsnap-helper",
         to: "Helpers/synara-appsnap-helper",
-      },
-      {
-        from: MAC_DEVICE_HELPER_STAGE_PATH,
-        to: MAC_DEVICE_HELPER_RESOURCE_PATH,
       },
     ]);
     assert.equal(extendInfo.NSMicrophoneUsageDescription, MICROPHONE_USAGE_DESCRIPTION);

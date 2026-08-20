@@ -11,14 +11,6 @@ import { AGENT_GATEWAY_TARGET_OPTIONS_DESCRIPTION } from "./targetResolver.ts";
 
 export const PROVIDER_KINDS: ReadonlyArray<ProviderKind> = [
   "codex",
-  "claudeAgent",
-  "cursor",
-  "antigravity",
-  "grok",
-  "droid",
-  "kilo",
-  "opencode",
-  "pi",
 ];
 
 export const MODEL_SELECTION_INPUT_SCHEMA = {

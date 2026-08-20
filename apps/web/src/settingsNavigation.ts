@@ -5,7 +5,6 @@
 
 export const SETTINGS_SECTION_IDS = [
   "general",
-  "profile",
   "appearance",
   "notifications",
   "behavior",
@@ -63,14 +62,6 @@ export const SETTINGS_NAV_ITEMS: readonly SettingsNavItem[] = [
     description: "Choose defaults for new chats, navigation, and the Environment panel.",
     icon: "settings-gear-4",
     eyebrow: "Workflow defaults",
-  },
-  {
-    id: "profile",
-    group: "personal",
-    label: "Profile",
-    description: "Your local activity, streaks, and a shareable stats card.",
-    icon: "user",
-    eyebrow: "Your stats",
   },
   {
     id: "appearance",

@@ -35,7 +35,6 @@ import * as SqlitePersistence from "./persistence/Layers/Sqlite";
 import { ProviderRuntimeEventRepositoryLive } from "./persistence/Layers/ProviderRuntimeEvents";
 import { makeServerApplicationLayers } from "./serverLayers";
 import { startServerMemoryDiagnostics } from "./memoryDiagnostics";
-import { startClaudeCredentialKeepalive } from "./provider/claudeCredentialKeepalive";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
 import { ProviderSessionReaperLive } from "./provider/Layers/ProviderSessionReaper";
 import { ProviderRuntimeReconcilerLive } from "./provider/Layers/ProviderRuntimeReconciler";
@@ -379,25 +378,6 @@ const makeServerProgram = (input: CliInput) =>
     // Start the retention loop after the server is live so startup can serve
     // existing history first, then hide inactive threads from the app in the background.
     yield* startThreadRetentionJob(orchestrationEngine, projectionSnapshotQuery);
-    // Optional Claude OAuth keepalive. Disabled by default because it touches
-    // Claude Code auth data in the background; users can opt in with
-    // SYNARA_CLAUDE_KEEPALIVE=1.
-    yield* Effect.forkChild(
-      Effect.gen(function* () {
-        const settings = yield* serverSettings.getSettings;
-        if (settings.providers.claudeAgent.enabled === false) {
-          return;
-        }
-        yield* Effect.sync(() =>
-          startClaudeCredentialKeepalive({
-            binaryPath: settings.providers.claudeAgent.binaryPath,
-            homeDir: config.homeDir,
-            log: (message) => Effect.runFork(Effect.logInfo(message)),
-          }),
-        );
-      }),
-    );
-
     yield* Effect.logInfo("Synara running", makeServerStartupLogData(config));
     if (startupPairingUrl) {
       if (config.allowInsecureRemote && !config.publicUrl) {

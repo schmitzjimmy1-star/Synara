@@ -5,9 +5,6 @@ import { AgentGatewayLive } from "./agentGateway/Layers/AgentGateway";
 import { AgentGatewayOperationRepositoryLive } from "./agentGateway/Layers/AgentGatewayOperationRepository";
 import { AgentGatewayCredentialsWithSecretsLive } from "./agentGateway/Layers/AgentGatewayCredentials";
 import { BrowserAutomationHostLive } from "./browserAutomation/Layers/BrowserAutomationHost";
-import { AutomationRunReactorLive } from "./automation/Layers/AutomationRunReactor";
-import { AutomationSchedulerLive } from "./automation/Layers/AutomationScheduler";
-import { AutomationServiceLive } from "./automation/Layers/AutomationService";
 import { CheckpointDiffQueryLive } from "./checkpointing/Layers/CheckpointDiffQuery";
 import { CheckpointStoreLive } from "./checkpointing/Layers/CheckpointStore";
 import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor";
@@ -45,7 +42,6 @@ import { ExternalMcpRepositoryLive } from "./externalMcp/Layers/ExternalMcpRepos
 import { ExternalMcpServiceLive } from "./externalMcp/Layers/ExternalMcpService";
 import { ExternalMcpGatewayLive } from "./externalMcp/Layers/ExternalMcpGateway";
 import { ServerEnvironmentLive } from "./environment/Layers/ServerEnvironment";
-import { AutomationRepositoryLive } from "./persistence/Layers/AutomationRepository";
 import { ProjectPullRequestPinsLive } from "./persistence/Layers/ProjectPullRequestPins";
 import { ProjectionTurnRepositoryLive } from "./persistence/Layers/ProjectionTurns";
 import { OrchestrationEventDeliveryRepositoryLive } from "./persistence/Layers/OrchestrationEventDeliveries";
@@ -53,7 +49,7 @@ import { ProviderRuntimeEventRepositoryLive } from "./persistence/Layers/Provide
 import { ThreadDiagnosticsQueryLive } from "./diagnostics/Layers/ThreadDiagnosticsQuery";
 import { ManagedAttachmentCleanupLive } from "./managedAttachmentCleanup";
 import { PullRequestServiceLive } from "./pullRequests/Layers/PullRequestService";
-import { ProviderHealthLive } from "./provider/Layers/ProviderHealth";
+import { CodexProviderHealthLive } from "./provider/Layers/CodexProviderHealth";
 import { makeServerProviderLayer } from "./provider/runtimeLayer";
 
 export { makeServerProviderLayer } from "./provider/runtimeLayer";
@@ -78,7 +74,7 @@ export function makeServerRuntimeServicesLayer(
 ) {
   const agentGatewayCredentialsLayer =
     options.agentGatewayCredentialsLayer ?? AgentGatewayCredentialsWithSecretsLive;
-  const providerHealthLayer = ProviderHealthLive.pipe(Layer.provideMerge(ServerSettingsLive));
+  const providerHealthLayer = CodexProviderHealthLive.pipe(Layer.provideMerge(ServerSettingsLive));
   const checkpointStoreLayer = CheckpointStoreLive.pipe(Layer.provide(GitCoreLive));
 
   const checkpointDiffQueryLayer = CheckpointDiffQueryLive.pipe(
@@ -160,21 +156,6 @@ export function makeServerRuntimeServicesLayer(
     authControlPlaneLayer,
     serverAuthLayer,
   );
-  const automationServiceLayer = AutomationServiceLive.pipe(
-    Layer.provideMerge(AutomationRepositoryLive),
-    Layer.provideMerge(ProjectionTurnRepositoryLive),
-    Layer.provideMerge(GitCoreLive),
-    Layer.provideMerge(TextGenerationLayerLive),
-    Layer.provideMerge(ServerSettingsLive),
-    Layer.provideMerge(runtimeServicesLayer),
-  );
-  const automationSchedulerLayer = AutomationSchedulerLive.pipe(
-    Layer.provideMerge(automationServiceLayer),
-    Layer.provideMerge(AutomationRepositoryLive),
-  );
-  const automationRunReactorLayer = AutomationRunReactorLive.pipe(
-    Layer.provideMerge(automationServiceLayer),
-  );
   const externalMcpServiceLayer = ExternalMcpServiceLive.pipe(
     Layer.provideMerge(ExternalMcpRepositoryLive),
     Layer.provideMerge(runtimeServicesLayer),
@@ -191,7 +172,6 @@ export function makeServerRuntimeServicesLayer(
   );
   const agentGatewayLayer = AgentGatewayLive.pipe(
     Layer.provideMerge(agentGatewayCredentialsLayer),
-    Layer.provideMerge(automationServiceLayer),
     Layer.provideMerge(runtimeServicesLayer),
     Layer.provideMerge(GitCoreLive),
     Layer.provideMerge(ProjectionTurnRepositoryLive),
@@ -202,9 +182,6 @@ export function makeServerRuntimeServicesLayer(
     Layer.provideMerge(ServerSettingsLive),
     Layer.provideMerge(providerHealthLayer),
     Layer.provideMerge(BrowserAutomationHostLive),
-    // The gateway exposes device_* tools only where a backend can exist, but it
-    // resolves the service on every platform to make that decision.
-    Layer.provideMerge(DeviceServiceLive),
   );
   const pullRequestServiceLayer = PullRequestServiceLive.pipe(
     Layer.provideMerge(GitLayerLive),
@@ -216,11 +193,7 @@ export function makeServerRuntimeServicesLayer(
     agentGatewayCredentialsLayer,
     agentGatewayLayer,
     BrowserAutomationHostLive,
-    automationServiceLayer,
-    automationSchedulerLayer,
-    automationRunReactorLayer,
     managedAttachmentCleanupLayer,
-    AutomationRepositoryLive,
     AgentGatewayOperationRepositoryLive,
     ExternalMcpRepositoryLive,
     externalMcpServiceLayer,

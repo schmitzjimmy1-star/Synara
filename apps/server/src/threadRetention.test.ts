@@ -15,7 +15,6 @@ import { describe, expect, it } from "vitest";
 
 import type { OrchestrationEngineShape } from "./orchestration/Services/OrchestrationEngine";
 import type { ProjectionSnapshotQueryShape } from "./orchestration/Services/ProjectionSnapshotQuery";
-import type { AutomationRepositoryShape } from "./persistence/Services/AutomationRepository";
 import { ServerLifecycleEvents, ServerLifecycleEventsLive } from "./serverLifecycleEvents";
 import {
   getRetentionArchiveRootIds,
@@ -264,16 +263,11 @@ describe("thread retention", () => {
     const snapshotQuery = {
       getShellSnapshot: () => Effect.succeed(shellSnapshot),
     } as unknown as ProjectionSnapshotQueryShape;
-    const automationRepository = {
-      list: () => Effect.succeed({ definitions: [], runs: [], memories: [] }),
-    } as unknown as AutomationRepositoryShape;
-
     const maintenanceEvent = await Effect.runPromise(
       Effect.gen(function* () {
         yield* runThreadRetentionSweep(
           engine,
           snapshotQuery,
-          automationRepository,
           Effect.sync(() => {
             pruneCount += 1;
           }),

@@ -995,7 +995,7 @@ export function useComposerSlashCommands(input: {
         return;
       }
 
-      if (item.command === "model" || item.command === "goal" || item.command === "automation") {
+      if (item.command === "model" || item.command === "goal") {
         const replacement = `/${item.command} `;
         const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
           snapshot.value,

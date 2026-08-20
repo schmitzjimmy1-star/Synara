@@ -110,8 +110,10 @@ const runListModels = (input: {
     makeConfigLayer(),
     ServerSettingsService.layerTest({
       providers: {
-        cursor: {
+        codex: {
           enabled: input.enabled,
+          homePath: path.join(homeDir, ".codex-openrouter"),
+          customModels: ["cursor-model", "valid-model", "invalid-model"],
         },
       },
     }),
@@ -120,7 +122,7 @@ const runListModels = (input: {
   const testLayer = ProviderDiscoveryServiceLive.pipe(Layer.provideMerge(baseLayer));
   const program = Effect.gen(function* () {
     const discovery = yield* ProviderDiscoveryService;
-    return yield* discovery.listModels({ provider: "cursor" });
+    return yield* discovery.listModels({ provider: "codex" });
   }).pipe(Effect.provide(testLayer));
   return Effect.runPromise(
     program as unknown as Effect.Effect<ProviderListModelsResult, never, never>,
@@ -134,6 +136,18 @@ beforeEach(async () => {
   baseDir = path.join(homeDir, ".synara");
   cwd = path.join(root, "repo");
   await mkdir(cwd, { recursive: true });
+  const openRouterHome = path.join(homeDir, ".codex-openrouter");
+  await mkdir(openRouterHome, { recursive: true });
+  await writeFile(
+    path.join(openRouterHome, "config.toml"),
+    [
+      'model_provider = "openrouter"',
+      "[model_providers.openrouter]",
+      'base_url = "https://openrouter.ai/api/v1"',
+      'wire_api = "responses"',
+      'env_key = "OPENROUTER_API_KEY"',
+    ].join("\n"),
+  );
 });
 
 afterEach(() => {
@@ -255,10 +269,12 @@ describe("ProviderDiscoveryService.listModels", () => {
 
   it("dispatches model discovery for an enabled provider", async () => {
     let adapterCalls = 0;
+    let receivedInput: unknown;
     const result = await runListModels({
       adapter: {
-        listModels: () => {
+        listModels: (input) => {
           adapterCalls += 1;
+          receivedInput = input;
           return Effect.succeed({
             models: [{ slug: "cursor-model", name: "Cursor Model" }],
             source: "cursor.cli",
@@ -270,7 +286,13 @@ describe("ProviderDiscoveryService.listModels", () => {
     });
 
     expect(result.models).toEqual([{ slug: "cursor-model", name: "Cursor Model" }]);
+    expect(result.source).toBe("cursor.cli+curated");
     expect(adapterCalls).toBe(1);
+    expect(receivedInput).toMatchObject({
+      provider: "codex",
+      binaryPath: "codex",
+      homePath: path.join(homeDir, ".codex-openrouter"),
+    });
   });
 
   it("omits malformed model descriptors while preserving valid entries", async () => {
@@ -291,7 +313,7 @@ describe("ProviderDiscoveryService.listModels", () => {
 
     expect(result).toEqual({
       models: [{ slug: "valid-model", name: "Valid Model" }],
-      source: "cursor.cli",
+      source: "cursor.cli+curated",
       cached: false,
     });
   });

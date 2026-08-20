@@ -4,7 +4,6 @@
 // Exports: Settings route component for `/settings`
 
 import { PROVIDER_DISPLAY_NAMES, type ProviderKind } from "@synara/contracts";
-import { PROVIDER_DESCRIPTORS } from "@synara/shared/providerMetadata";
 import { sameAppSnapShortcut } from "@synara/shared/appSnapShortcut";
 import { createFileRoute, useSearch } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
@@ -45,7 +44,6 @@ import {
 import { ProviderOptionLabel } from "../components/ProviderIcon";
 import ReleaseHistoryDialog from "../components/ReleaseHistoryDialog";
 import { KeyboardShortcutsSettingsPanel } from "../components/settings/KeyboardShortcutsSettingsPanel";
-import { ProfileSettingsPanel } from "../components/settings/ProfileSettingsPanel";
 import { ProviderUsageSettingsPanel } from "../components/settings/ProviderUsageSettingsPanel";
 import { ExternalMcpSettingsPanel } from "../components/settings/ExternalMcpSettingsPanel";
 import {
@@ -154,7 +152,7 @@ const CHAT_WIDTH_OPTIONS = [
   description: string;
 }>;
 
-const PROVIDER_SELECT_OPTIONS = PROVIDER_DESCRIPTORS.map((descriptor) => descriptor.kind);
+const PROVIDER_SELECT_OPTIONS = ["codex"] as const;
 
 const TIMESTAMP_FORMAT_LABELS = {
   locale: "System default",
@@ -183,7 +181,7 @@ const FOLLOW_UP_BEHAVIOR_OPTIONS = [
 // Shared settings controls live in ~/components/settings/SettingControls.
 
 function isProviderSelectOption(value: string): value is ProviderKind {
-  return PROVIDER_SELECT_OPTIONS.includes(value as ProviderKind);
+  return value === "codex";
 }
 
 // Keys of AppSettings whose value is a plain boolean — the only ones that can be
@@ -310,9 +308,6 @@ function SettingsRouteView() {
       : []),
     ...(settings.showChatsSection !== defaults.showChatsSection ? ["Chats section"] : []),
     ...(settings.showStudioSection !== defaults.showStudioSection ? ["Studio section"] : []),
-    ...(settings.showAutomationRunThreads !== defaults.showAutomationRunThreads
-      ? ["Automation runs"]
-      : []),
     ...(settings.uiDensity !== defaults.uiDensity ? ["UI density"] : []),
     ...(settings.chatWidth !== defaults.chatWidth ? ["Chat width"] : []),
     ...(settings.desktopAppIcon !== defaults.desktopAppIcon ? ["App icon"] : []),
@@ -613,14 +608,6 @@ function SettingsRouteView() {
           ariaLabel: "Show the Studio section in the sidebar",
         })}
 
-        {renderBooleanSettingRow({
-          settingKey: "showAutomationRunThreads",
-          title: "Automation runs",
-          description:
-            "Show the thread each standalone automation run creates. Runs stay listed on the automation's page either way; threads owned by dedicated or heartbeat automations always stay visible.",
-          resetLabel: "automation runs",
-          ariaLabel: "Show automation run threads in the sidebar",
-        })}
       </SettingsSection>
 
       <div id={SETTINGS_TARGETS.environmentPanel} className="space-y-6">
@@ -1200,8 +1187,6 @@ function SettingsRouteView() {
         return renderBehaviorPanel();
       case "shortcuts":
         return <KeyboardShortcutsSettingsPanel />;
-      case "profile":
-        return <ProfileSettingsPanel />;
       case "skills":
         return <SkillsSettingsPanel />;
       case "usage":
@@ -1245,13 +1230,9 @@ function SettingsRouteView() {
         <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
           <div className="flex-1 overflow-y-auto">
             <div
-              className={cn(
-                "mx-auto w-full px-6 py-8",
-                activeSection === "profile" ? "max-w-3xl" : "max-w-2xl",
-              )}
+              className="mx-auto w-full max-w-2xl px-6 py-8"
             >
-              {activeSection !== "profile" ? (
-                <div className="mb-8 flex items-start justify-between gap-4">
+              <div className="mb-8 flex items-start justify-between gap-4">
                   <div className="min-w-0">
                     <h1 className="text-xl font-medium tracking-tight text-foreground">
                       {activeSectionItem.label}
@@ -1270,8 +1251,7 @@ function SettingsRouteView() {
                     <RotateCcwIcon className="size-3.5" />
                     Restore defaults
                   </Button>
-                </div>
-              ) : null}
+              </div>
 
               {renderRouteOwnedPanel()}
               {/* These workflow owners stay mounted so drafts, request guards, and pending

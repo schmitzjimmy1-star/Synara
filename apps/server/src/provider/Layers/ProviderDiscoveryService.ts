@@ -13,6 +13,9 @@ import {
   ProviderReadPluginInput,
   type ProviderSkillDescriptor,
 } from "@synara/contracts";
+import { isOpenRouterCodexConfig } from "@synara/shared/codexConfig";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { Effect, Layer, Option, Schema, SchemaIssue } from "effect";
 
 import { ServerConfig } from "../../config.ts";
@@ -60,6 +63,14 @@ const disabledCapabilitiesForProvider = (
 });
 
 const decodeProviderModelDescriptorOption = Schema.decodeUnknownOption(ProviderModelDescriptor);
+
+async function isValidatedOpenRouterHome(homePath: string): Promise<boolean> {
+  try {
+    return isOpenRouterCodexConfig(await readFile(join(homePath, "config.toml"), "utf8"));
+  } catch {
+    return false;
+  }
+}
 
 function isolateMalformedModelDescriptors(input: {
   readonly provider: ProviderListModelsInput["provider"];
@@ -247,7 +258,35 @@ const make = Effect.gen(function* () {
           cached: false,
         };
       }
-      const result = yield* adapter.listModels(parsed);
+      const discovered = yield* adapter.listModels(
+        parsed.provider === "codex" && settings !== null
+          ? {
+              ...parsed,
+              binaryPath: settings.providers.codex.binaryPath,
+              ...(settings.providers.codex.homePath
+                ? { homePath: settings.providers.codex.homePath }
+                : {}),
+            }
+          : parsed,
+      );
+      const configuredModels = settings?.providers[parsed.provider].customModels ?? [];
+      const configuredModelSet = new Set(configuredModels);
+      const shouldCurateCodexModels =
+        parsed.provider === "codex" &&
+        settings !== null &&
+        settings.providers.codex.homePath.trim().length > 0 &&
+        configuredModelSet.size > 0 &&
+        (yield* Effect.promise(() =>
+          isValidatedOpenRouterHome(settings.providers.codex.homePath.trim()),
+        ));
+      const result =
+        shouldCurateCodexModels
+          ? {
+              ...discovered,
+              models: discovered.models.filter((model) => configuredModelSet.has(model.slug)),
+              source: `${discovered.source ?? "codex"}+curated`,
+            }
+          : discovered;
       return yield* isolateMalformedModelDescriptors({
         provider: parsed.provider,
         result,

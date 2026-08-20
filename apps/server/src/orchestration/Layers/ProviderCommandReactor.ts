@@ -6,6 +6,7 @@ import {
   type ChatAttachment,
   type CheckpointRef,
   CommandId,
+  DEFAULT_MODEL_BY_PROVIDER,
   EventId,
   type ModelSelection,
   MessageId,
@@ -15,6 +16,7 @@ import {
   type ProviderInteractionMode,
   type ProviderRuntimeEvent,
   ProviderKind,
+  OPENROUTER_CODEX_DEFAULT_MODEL,
   type ProviderReviewTarget,
   type ProviderStartOptions,
   type ProviderSkillReference,
@@ -1160,31 +1162,46 @@ const make = Effect.gen(function* () {
         new Error(`Thread '${threadId}' was not found in projection state.`),
       );
     }
-    const shouldRegisterContextBootstrap =
-      thread.session?.status !== "stopped" &&
-      !suppressContextBootstrapOnNextStartThreadIds.has(threadId);
-
     const desiredRuntimeMode = options?.runtimeMode ?? thread.runtimeMode;
-    const currentProvider: ProviderKind | undefined = Schema.is(ProviderKind)(
+    const persistedProvider: ProviderKind | undefined = Schema.is(ProviderKind)(
       thread.session?.providerName,
     )
       ? thread.session.providerName
       : undefined;
-    const requestedModelSelection = options?.modelSelection;
-    const threadProvider: ProviderKind = currentProvider ?? thread.modelSelection.provider;
-    if (
-      requestedModelSelection !== undefined &&
-      requestedModelSelection.provider !== threadProvider
-    ) {
-      return yield* new ProviderAdapterValidationError({
-        provider: threadProvider,
-        operation: "thread.turn.start",
-        issue: `Thread '${threadId}' is bound to provider '${threadProvider}' and cannot switch to '${requestedModelSelection.provider}'.`,
-      });
-    }
-    const preferredProvider: ProviderKind = currentProvider ?? threadProvider;
-    const desiredModelSelection = requestedModelSelection ?? thread.modelSelection;
+    const retiredProviderBinding =
+      (persistedProvider !== undefined && persistedProvider !== "codex") ||
+      thread.modelSelection.provider !== "codex";
+    const currentProvider: ProviderKind | undefined =
+      persistedProvider === "codex" ? persistedProvider : undefined;
+    const threadProvider: ProviderKind = "codex";
+    const preferredProvider: ProviderKind = "codex";
     const settingsSnapshot = yield* serverSettings.getSnapshot;
+    const openRouterProfileActive =
+      settingsSnapshot.settings.providers.codex.homePath.trim().length > 0 &&
+      settingsSnapshot.settings.providers.codex.customModels.includes(
+        OPENROUTER_CODEX_DEFAULT_MODEL,
+      );
+    const fallbackCodexModel = openRouterProfileActive
+      ? OPENROUTER_CODEX_DEFAULT_MODEL
+      : DEFAULT_MODEL_BY_PROVIDER.codex;
+    const normalizeCodexSelection = (
+      selection: ModelSelection | undefined,
+    ): ModelSelection | undefined =>
+      selection?.provider === "codex" && openRouterProfileActive && !selection.model.includes("/")
+        ? { ...selection, model: OPENROUTER_CODEX_DEFAULT_MODEL }
+        : selection;
+    const requestedModelSelection = normalizeCodexSelection(
+      options?.modelSelection?.provider === "codex" ? options.modelSelection : undefined,
+    );
+    const desiredModelSelection: ModelSelection =
+      requestedModelSelection ??
+      (thread.modelSelection.provider === "codex"
+        ? normalizeCodexSelection(thread.modelSelection)!
+        : { provider: "codex", model: fallbackCodexModel });
+    const shouldRegisterContextBootstrap =
+      !retiredProviderBinding &&
+      thread.session?.status !== "stopped" &&
+      !suppressContextBootstrapOnNextStartThreadIds.has(threadId);
     if (!settingsSnapshot.settings.providers[preferredProvider].enabled) {
       return yield* new ProviderAdapterValidationError({
         provider: preferredProvider,

@@ -61,8 +61,6 @@ export function useSpacesController(input: {
   sidebarThreads: readonly SidebarThreadSummary[];
   sidebarThreadSortOrder: SidebarThreadSortOrder;
   routeThreadId: ThreadId | null;
-  routeProjectId: ProjectId | null;
-  isOnKanban: boolean;
   activeRouteProject: Project | null;
   activeRouteProjectId: ProjectId | null;
   activateThreadFromSidebarIntent: (threadId: ThreadId) => void;
@@ -73,11 +71,9 @@ export function useSpacesController(input: {
     activateThreadFromSidebarIntent,
     activeRouteProject,
     activeRouteProjectId,
-    isOnKanban,
     onCloseProjectContextMenu,
     ordinarySpaceProjects,
     projectById,
-    routeProjectId,
     routeThreadId,
     sidebarThreadSortOrder,
     sidebarThreads,
@@ -92,7 +88,6 @@ export function useSpacesController(input: {
   const setActiveSpaceId = useSpacesUiStore((store) => store.setActiveSpaceId);
   const setOptimisticActiveSpaceId = useSpacesUiStore((store) => store.setOptimisticActiveSpaceId);
   const rememberSpaceThread = useSpacesUiStore((store) => store.rememberThread);
-  const rememberSpaceProject = useSpacesUiStore((store) => store.rememberProject);
   const getLastSpaceThreadId = useSpacesUiStore((store) => store.getLastThreadId);
   const getLastSpaceProjectId = useSpacesUiStore((store) => store.getLastProjectId);
   const reconcileSpacesUi = useSpacesUiStore((store) => store.reconcile);
@@ -107,8 +102,7 @@ export function useSpacesController(input: {
     [chatWorkspaceRoot, homeDir, studioWorkspaceRoot],
   );
 
-  const routeSpaceProject =
-    isOnKanban && routeProjectId ? (projectById.get(routeProjectId) ?? null) : activeRouteProject;
+  const routeSpaceProject = activeRouteProject;
   const routeSpaceContext = isOrdinarySpaceProject(routeSpaceProject, workspacePaths)
     ? { projectId: routeSpaceProject.id, spaceId: routeSpaceProject.spaceId ?? null }
     : null;
@@ -144,7 +138,6 @@ export function useSpacesController(input: {
   ]);
 
   useRouteSpaceSync({
-    isOnKanban,
     routeProjectId: routeSpaceProjectId,
     routeSpaceId,
     routeThreadId,
@@ -159,20 +152,13 @@ export function useSpacesController(input: {
 
   // Bookmark the context being left so returning to that space restores it.
   const rememberDepartingSpaceContext = useCallback(() => {
-    const currentRouteSpaceProject =
-      isOnKanban && routeProjectId ? (projectById.get(routeProjectId) ?? null) : activeRouteProject;
+    const currentRouteSpaceProject = activeRouteProject;
     if (routeThreadId && isOrdinarySpaceProject(currentRouteSpaceProject, workspacePaths)) {
       rememberSpaceThread(currentRouteSpaceProject.spaceId ?? null, routeThreadId);
-    } else if (isOnKanban && isOrdinarySpaceProject(currentRouteSpaceProject, workspacePaths)) {
-      rememberSpaceProject(currentRouteSpaceProject.spaceId ?? null, currentRouteSpaceProject.id);
     }
   }, [
     activeRouteProject,
-    isOnKanban,
-    projectById,
-    rememberSpaceProject,
     rememberSpaceThread,
-    routeProjectId,
     routeThreadId,
     workspacePaths,
   ]);
@@ -219,10 +205,7 @@ export function useSpacesController(input: {
 
       if (target.kind === "project") {
         startTransition(() => {
-          void navigate({
-            to: "/kanban/$projectId",
-            params: { projectId: target.projectId },
-          });
+          void navigate({ to: "/", search: { space: spaceKey(spaceId) } });
         });
         return;
       }
@@ -299,7 +282,7 @@ export function useSpacesController(input: {
           return;
         }
 
-        if (activeRouteProjectId === projectId || (isOnKanban && routeProjectId === projectId)) {
+        if (activeRouteProjectId === projectId) {
           selectSpaceForNavigation(spaceId);
           setOptimisticActiveSpaceId(spaceId, sequence);
         }
@@ -313,8 +296,6 @@ export function useSpacesController(input: {
     [
       activeRouteProjectId,
       handleSelectSpace,
-      isOnKanban,
-      routeProjectId,
       selectSpaceForNavigation,
       setOptimisticActiveSpaceId,
       setVoidSpace,
@@ -339,9 +320,7 @@ export function useSpacesController(input: {
       if (!confirmed) return;
 
       // Resolved before the `try`: React Compiler cannot lower a `??` chain inside a try block.
-      const activeContextProject =
-        activeRouteProject ??
-        (isOnKanban && routeProjectId ? (projectById.get(routeProjectId) ?? null) : null);
+      const activeContextProject = activeRouteProject;
 
       try {
         await deleteSpace({ api, spaceId });
@@ -364,11 +343,9 @@ export function useSpacesController(input: {
     [
       activeRouteProject,
       activeSpaceId,
-      isOnKanban,
       navigate,
       ordinarySpaceProjects,
       projectById,
-      routeProjectId,
       selectSpaceForNavigation,
       spaces,
       workspacePaths,
@@ -443,8 +420,7 @@ export function useSpacesController(input: {
       onCloseProjectContextMenu();
       // Evaluated before the `try` (see `spaceOrderMatches`); none of these inputs can change
       // across the await anyway.
-      const movesTheRoutedProject =
-        activeRouteProjectId === projectId || (isOnKanban && routeProjectId === projectId);
+      const movesTheRoutedProject = activeRouteProjectId === projectId;
       try {
         await moveProjectToSpace({ api, projectId, spaceId });
         if (movesTheRoutedProject) {
@@ -460,10 +436,8 @@ export function useSpacesController(input: {
     },
     [
       activeRouteProjectId,
-      isOnKanban,
       onCloseProjectContextMenu,
       projectById,
-      routeProjectId,
       selectSpaceForNavigation,
     ],
   );

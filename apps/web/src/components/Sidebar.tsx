@@ -13,7 +13,6 @@ import {
   ExternalLinkIcon,
   FolderOpenIcon,
   GiftIcon,
-  KanbanIcon,
   KeyboardIcon,
   BellIcon,
   type LucideIcon,
@@ -75,8 +74,6 @@ import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { CSS } from "@dnd-kit/utilities";
 import {
-  type AutomationDefinition,
-  type AutomationListResult,
   MAX_PINNED_PROJECTS,
   type DesktopUpdateState,
   type OrchestrationShellSnapshot,
@@ -170,13 +167,6 @@ import { resolveThreadEnvironmentPresentation } from "../lib/threadEnvironment";
 import { dispatchThreadRename } from "../lib/threadRename";
 import { quotePosixShellArgument } from "../lib/shellQuote";
 import { DEFAULT_THREAD_TERMINAL_ID, type SidebarThreadSummary, type Thread } from "../types";
-import {
-  applyAutomationEvent,
-  automationAttentionCount,
-  automationQueryKey,
-  formatCadence,
-  groupAutomationsByContinuedThread,
-} from "../routes/-automations.shared";
 import { shouldRenderTerminalWorkspace } from "./ChatView.logic";
 import { CHAT_SURFACE_HEADER_HEIGHT_CLASS } from "./chat/chatHeaderControls";
 import { SidebarLeadingControls } from "./SidebarHeaderNavigationControls";
@@ -477,7 +467,6 @@ const DebugFeatureFlagsMenu = import.meta.env.DEV
 
 type ProjectContextMenuId =
   | "open-in-finder"
-  | "open-in-kanban"
   | "copy-path"
   | "start-dev"
   | "stop-dev"
@@ -620,7 +609,7 @@ function resolveWorktreeBadgeLabel(
 }
 
 type ThreadMetaChip = {
-  id: "automation" | "handoff" | "fork" | "worktree";
+  id: "handoff" | "fork" | "worktree";
   tooltip: string;
   icon: ReactNode;
 };
@@ -641,34 +630,9 @@ function resolveThreadRowMetaChips(input: {
    * pair, the trailing handoff chip is a redundant double icon and is dropped.
    */
   handoffShownInAvatar?: boolean;
-  /** Heartbeat automations targeting this thread; surfaced as an at-a-glance clock chip. */
-  threadAutomations?: readonly AutomationDefinition[] | undefined;
 }): ThreadMetaChip[] {
   const chips: ThreadMetaChip[] = [];
   const isSidechatThread = Boolean(input.thread.sidechatSourceThreadId);
-
-  const threadAutomations = input.threadAutomations;
-  if (threadAutomations && threadAutomations.length > 0) {
-    const anyEnabled = threadAutomations.some((automation) => automation.enabled);
-    const firstAutomation = threadAutomations[0]!;
-    const tooltip =
-      threadAutomations.length === 1
-        ? `${firstAutomation.name} · ${
-            firstAutomation.enabled ? formatCadence(firstAutomation.schedule) : "Paused"
-          }`
-        : `${threadAutomations.length} automations`;
-    chips.push({
-      id: "automation",
-      tooltip,
-      icon: (
-        <SidebarGlyph
-          icon={ClockIcon}
-          variant="meta"
-          className={anyEnabled ? "text-muted-foreground/55" : "text-muted-foreground/40"}
-        />
-      ),
-    });
-  }
 
   const handoffBadgeLabel = resolveThreadHandoffBadgeLabel(input.thread);
   if (input.includeHandoffBadge && !input.handoffShownInAvatar && handoffBadgeLabel) {
@@ -1362,34 +1326,7 @@ export default function Sidebar() {
     select: (loc) => loc.pathname === "/settings",
   });
   const isOnStudioRoute = pathname.startsWith("/studio");
-  const isOnKanban = pathname.startsWith("/kanban");
-  const isOnAutomations = pathname.startsWith("/automations");
   const isOnPullRequests = pathname.startsWith("/pull-requests");
-  // Lightweight read of automations to drive the sidebar attention badge. Shares the
-  // ["automations"] query cache with the Automations route (and its live stream updates).
-  const automationListQuery = useQuery({
-    queryKey: automationQueryKey,
-    queryFn: () => ensureNativeApi().automation.list({}),
-  });
-  useEffect(() => {
-    const api = ensureNativeApi();
-    return api.automation.onEvent((event) => {
-      queryClient.setQueryData<AutomationListResult>(automationQueryKey, (prev) =>
-        applyAutomationEvent(prev, event),
-      );
-    });
-  }, [queryClient]);
-  const automationAttentionBadge = useMemo(() => {
-    const data = automationListQuery.data;
-    if (!data) return null;
-    const count = automationAttentionCount(data.runs);
-    return count > 0
-      ? {
-          text: String(count),
-          accessibleLabel: `${count} ${pluralize(count, "automation needs", "automations need")} attention`,
-        }
-      : null;
-  }, [automationListQuery.data]);
   const pullRequestRepositoryConfig = useMemo(
     () => pullRequestRepositoryConfigFingerprint(projects),
     [projects],
@@ -1406,12 +1343,6 @@ export default function Sidebar() {
     enabled: projects.some((project) => project.kind === "project"),
   });
   const pullRequestsReviewBadge = resolvePullRequestReviewBadge(pullRequestsReviewingQuery.data);
-  // Heartbeat automations grouped by their target thread, so each thread row can show a
-  // clock chip indicating an automation is attached (mirrors the Environment panel section).
-  const automationsByThreadId = useMemo(
-    () => groupAutomationsByContinuedThread(automationListQuery.data?.definitions ?? []),
-    [automationListQuery.data],
-  );
   const { settings: appSettings, serverSettings, updateSettings } = useAppSettings();
   // Projects is always available; Studio and the standalone Chats footer can be hidden
   // independently from Settings.
@@ -1424,11 +1355,6 @@ export default function Sidebar() {
   const routeThreadId = useParams({
     strict: false,
     select: (params) => (params.threadId ? ThreadId.makeUnsafe(params.threadId) : null),
-  });
-  const routeProjectId = useParams({
-    strict: false,
-    select: (params) =>
-      typeof params.projectId === "string" ? ProjectId.makeUnsafe(params.projectId) : null,
   });
   const routeSearch = useDiffRouteSearch();
   const settingsSectionSearch = useSearch({ strict: false }) as Record<string, unknown>;
@@ -3322,8 +3248,6 @@ export default function Sidebar() {
     sidebarThreads,
     sidebarThreadSortOrder: appSettings.sidebarThreadSortOrder,
     routeThreadId,
-    routeProjectId,
-    isOnKanban,
     activeRouteProject,
     activeRouteProjectId,
     activateThreadFromSidebarIntent,
@@ -3474,10 +3398,6 @@ export default function Sidebar() {
                 : "An unknown error occurred opening the folder.",
           });
         }
-        return;
-      }
-      if (clicked === "open-in-kanban") {
-        void navigate({ to: "/kanban/$projectId", params: { projectId } });
         return;
       }
       if (clicked === "copy-path") {
@@ -4373,7 +4293,6 @@ export default function Sidebar() {
         threadEntryPoint !== "terminal" &&
         !isGenericChatThreadTitle(thread.title) &&
         Boolean(thread.handoff?.sourceProvider),
-      threadAutomations: automationsByThreadId.get(thread.id),
     });
     const threadStatus = resolveThreadStatusForSidebar(thread);
     const isSubagentThread = Boolean(thread.parentThreadId);
@@ -4542,7 +4461,6 @@ export default function Sidebar() {
         threadEntryPoint !== "terminal" &&
         !isGenericChatThreadTitle(thread.title) &&
         Boolean(thread.handoff?.sourceProvider),
-      threadAutomations: automationsByThreadId.get(thread.id),
     });
     const isSubagentThread = Boolean(thread.parentThreadId);
     const leadingPrStatus =
@@ -5879,14 +5797,6 @@ export default function Sidebar() {
                         onFocus={prefetchModelsForPrimaryNewThread}
                       />
                       <SidebarPrimaryAction
-                        icon={KanbanIcon}
-                        label="Kanban"
-                        active={isOnKanban}
-                        onClick={() => {
-                          void navigate({ to: "/kanban" });
-                        }}
-                      />
-                      <SidebarPrimaryAction
                         icon={IoIosGitCompare}
                         label="Pull requests"
                         active={isOnPullRequests}
@@ -5896,15 +5806,6 @@ export default function Sidebar() {
                             to: "/pull-requests",
                             search: { involvement: "all", state: "open" },
                           });
-                        }}
-                      />
-                      <SidebarPrimaryAction
-                        icon={ClockIcon}
-                        label="Automations"
-                        active={isOnAutomations}
-                        badge={automationAttentionBadge}
-                        onClick={() => {
-                          void navigate({ to: "/automations" });
                         }}
                       />
                     </>
@@ -6368,18 +6269,6 @@ export default function Sidebar() {
               >
                 <ProjectContextMenuIcon icon={FolderOpenIcon} />
                 <span>Open in Finder</span>
-              </MenuItem>
-              <MenuItem
-                className={PROJECT_CONTEXT_MENU_ITEM_CLASS_NAME}
-                onClick={() =>
-                  void handleProjectContextMenuAction(
-                    projectContextMenuState.projectId,
-                    "open-in-kanban",
-                  )
-                }
-              >
-                <ProjectContextMenuIcon icon={KanbanIcon} />
-                <span>Open in Kanban</span>
               </MenuItem>
               <MenuItem
                 className={PROJECT_CONTEXT_MENU_ITEM_CLASS_NAME}

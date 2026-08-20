@@ -1,20 +1,36 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname } from "node:path";
-import { DEFAULT_GIT_TEXT_GENERATION_MODEL, DEFAULT_MODEL_BY_PROVIDER } from "@synara/contracts";
+import { join } from "node:path";
+import {
+  DEFAULT_GIT_TEXT_GENERATION_MODEL,
+  DEFAULT_MODEL_BY_PROVIDER,
+} from "@synara/contracts";
 import { Effect, FileSystem, Layer } from "effect";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { ServerConfig } from "./config";
 import { ServerSettingsLive, ServerSettingsService } from "./serverSettings";
 
-const serverConfigLayer = ServerConfig.layerTest(process.cwd(), {
+const testHomeDir = mkdtempSync(join(tmpdir(), "synara-settings-home-"));
+const baseServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "synara-settings-test-",
 }).pipe(Layer.provide(NodeServices.layer));
+const serverConfigLayer = Layer.effect(
+  ServerConfig,
+  Effect.gen(function* () {
+    const config = yield* ServerConfig;
+    return { ...config, homeDir: testHomeDir };
+  }),
+).pipe(Layer.provide(baseServerConfigLayer));
 const makeTestLayer = Layer.merge(NodeServices.layer, serverConfigLayer);
 const testLayer = Layer.merge(makeTestLayer, ServerSettingsLive.pipe(Layer.provide(makeTestLayer)));
 
 const runWithSettings = <A, E>(
   effect: Effect.Effect<A, E, ServerSettingsService | ServerConfig | FileSystem.FileSystem>,
 ) => Effect.runPromise(effect.pipe(Effect.provide(testLayer)) as Effect.Effect<A, E, never>);
+
+afterAll(() => rmSync(testHomeDir, { recursive: true, force: true }));
 
 describe("ServerSettingsService", () => {
   it("loads defaults when settings file does not exist", async () => {
@@ -28,6 +44,8 @@ describe("ServerSettingsService", () => {
 
     expect(settings.providers.codex.binaryPath).toBe("codex");
     expect(settings.providers.grok.binaryPath).toBe("grok");
+    expect(settings.providers.grok.enabled).toBe(false);
+    expect(settings.providers.codex.customModels).toHaveLength(0);
     expect(settings.defaultThreadEnvMode).toBe("local");
     expect(settings.enableProviderUpdateChecks).toBe(true);
   });

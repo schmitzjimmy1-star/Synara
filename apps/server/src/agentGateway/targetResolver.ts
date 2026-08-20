@@ -45,6 +45,8 @@ export interface AgentGatewayProviderCatalog {
 
 export interface AgentGatewayProviderAvailability {
   readonly enabled: boolean;
+  /** Profile-aware fallback used only when model discovery is unavailable. */
+  readonly defaultModel?: string | null;
   /** Undefined means health has not produced a trustworthy snapshot yet. */
   readonly available?: boolean;
   readonly authStatus?: ServerProviderAuthStatus;
@@ -248,7 +250,7 @@ export function loadAgentGatewayProviderCatalog(input: {
   readonly availability?: AgentGatewayProviderAvailability;
   readonly cwd?: string;
 }): Effect.Effect<AgentGatewayProviderCatalog> {
-  const defaultModel = providerDefaultModel(input.provider);
+  const defaultModel = input.availability?.defaultModel ?? providerDefaultModel(input.provider);
   const availability = input.availability ?? { enabled: true };
   const unavailableReason =
     availability.enabled === false

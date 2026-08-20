@@ -123,12 +123,12 @@ type ProviderInstallSettings = {
 };
 
 const PROVIDER_VISIBILITY_OPTIONS: ReadonlyArray<{ provider: ProviderKind; title: string }> =
-  PROVIDER_DESCRIPTORS.map((descriptor) => ({
+  PROVIDER_DESCRIPTORS.filter((descriptor) => descriptor.kind === "codex").map((descriptor) => ({
     provider: descriptor.kind,
     title: descriptor.displayName,
   }));
 
-const PROVIDER_INSTALL_SETTINGS: readonly ProviderInstallSettings[] = [
+const ALL_PROVIDER_INSTALL_SETTINGS: readonly ProviderInstallSettings[] = [
   {
     provider: "codex",
     docs: [
@@ -379,6 +379,10 @@ const PROVIDER_INSTALL_SETTINGS: readonly ProviderInstallSettings[] = [
     ],
   },
 ];
+
+const PROVIDER_INSTALL_SETTINGS = ALL_PROVIDER_INSTALL_SETTINGS.filter(
+  (config) => config.provider === "codex",
+);
 
 function isProviderInstallFieldDirty(
   field: ProviderInstallField,

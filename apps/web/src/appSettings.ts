@@ -966,17 +966,9 @@ export function getGitTextGenerationModelOptions(
     >
   >,
 ): AppModelOption[] {
-  const options = [
-    ...(discoveredOptionsByProvider?.codex
-      ? mapCatalogModelOptionsToAppModelOptions("codex", discoveredOptionsByProvider.codex)
-      : getAppModelOptions("codex", settings.customCodexModels)),
-    ...(discoveredOptionsByProvider?.kilo
-      ? mapCatalogModelOptionsToAppModelOptions("kilo", discoveredOptionsByProvider.kilo)
-      : getAppModelOptions("kilo", settings.customKiloModels)),
-    ...(discoveredOptionsByProvider?.opencode
-      ? mapCatalogModelOptionsToAppModelOptions("opencode", discoveredOptionsByProvider.opencode)
-      : getAppModelOptions("opencode", settings.customOpenCodeModels)),
-  ];
+  const options = discoveredOptionsByProvider?.codex
+    ? mapCatalogModelOptionsToAppModelOptions("codex", discoveredOptionsByProvider.codex)
+    : getAppModelOptions("codex", settings.customCodexModels);
   const deduped: AppModelOption[] = [];
   const seen = new Set<string>();
 
@@ -990,9 +982,7 @@ export function getGitTextGenerationModelOptions(
   }
 
   const selectedModel = settings.textGenerationModel?.trim();
-  const selectedProvider =
-    settings.textGenerationProvider ??
-    resolveTextGenerationProvider(selectedModel !== undefined ? { model: selectedModel } : {});
+  const selectedProvider = "codex" as const;
   if (selectedModel && !seen.has(`${selectedProvider}:${selectedModel}`)) {
     deduped.push({
       provider: selectedProvider,

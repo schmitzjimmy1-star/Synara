@@ -22,8 +22,8 @@ import { errorSnapshot } from "./parse";
 import { PROVIDER_USAGE_FETCHERS } from "./registry";
 import type { ProviderUsageContext } from "./types";
 
-// Providers whose live snapshot is enriched with on-disk token-total lines (24h/7d/30d).
-const LOCAL_ARCHIVE_PROVIDERS: ReadonlySet<ProviderKind> = new Set(["codex", "claudeAgent"]);
+// Codex is the only live provider in this fork.
+const LOCAL_ARCHIVE_PROVIDERS: ReadonlySet<ProviderKind> = new Set(["codex"]);
 
 const providerChildKind = (provider: ProviderKind): ProviderChildKind =>
   provider === "claudeAgent" ? "claude" : provider;
@@ -203,7 +203,9 @@ export async function collectProviderUsageSnapshots(
   options: { forceRefresh?: boolean; provider?: ProviderKind } = {},
 ): Promise<ServerProviderUsageSnapshot[]> {
   const providers = options.provider
-    ? ([options.provider] as ProviderKind[])
+    ? PROVIDER_USAGE_FETCHERS[options.provider]
+      ? ([options.provider] as ProviderKind[])
+      : []
     : PROVIDER_USAGE_PROVIDERS.filter(
         (provider) => PROVIDER_USAGE_FETCHERS[provider] !== undefined,
       );
@@ -228,7 +230,6 @@ export const listProviderUsage = Effect.fn(function* (input: ServerListProviderU
         {
           ...buildContext(),
           homeDir: serverConfig.homeDir,
-          claudeBinaryPath: settings.providers.claudeAgent.binaryPath,
         },
         {
           forceRefresh: input.forceRefresh === true,

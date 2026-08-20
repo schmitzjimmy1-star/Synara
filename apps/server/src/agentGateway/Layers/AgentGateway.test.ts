@@ -342,8 +342,6 @@ function makeHarnessLayer(
           }
         : null;
     },
-    issueStdioBootstrapToken: () => "bootstrap-test-token",
-    exchangeStdioBootstrapToken: () => null,
     bindWriteAuthority: (token: string, turnId: string) => {
       const threadId = VALID_TOKENS[token];
       return threadId
@@ -377,7 +375,6 @@ function makeHarnessLayer(
       url: "http://127.0.0.1:3773/mcp",
       bearerToken: `token-for-${threadId}`,
     }),
-    stdioProxy: { command: "node", args: ["/tmp/proxy.mjs"] },
   });
 
   const threadsById = new Map(threads.map((thread) => [thread.id as string, thread]));

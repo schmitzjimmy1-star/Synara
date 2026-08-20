@@ -1,7 +1,7 @@
 /**
  * ProviderAdapterRegistryLive - In-memory provider adapter lookup layer.
  *
- * Binds provider kinds (codex/claudeAgent/...) to concrete adapter services.
+ * Binds the supported provider kind to its concrete adapter service.
  * This layer only performs adapter lookup; it does not route session-scoped
  * calls or own provider lifecycle workflows.
  *
@@ -16,15 +16,7 @@ import {
   ProviderAdapterRegistry,
   type ProviderAdapterRegistryShape,
 } from "../Services/ProviderAdapterRegistry.ts";
-import { ClaudeAdapter } from "../Services/ClaudeAdapter.ts";
 import { CodexAdapter } from "../Services/CodexAdapter.ts";
-import { CursorAdapter } from "../Services/CursorAdapter.ts";
-import { DroidAdapter } from "../Services/DroidAdapter.ts";
-import { GrokAdapter } from "../Services/GrokAdapter.ts";
-import { KiloAdapter } from "../Services/KiloAdapter.ts";
-import { OpenCodeAdapter } from "../Services/OpenCodeAdapter.ts";
-import { PiAdapter } from "../Services/PiAdapter.ts";
-import { AntigravityAdapter } from "../Services/AntigravityAdapter.ts";
 
 export interface ProviderAdapterRegistryLiveOptions {
   readonly adapters?: ReadonlyArray<ProviderAdapterShape<ProviderAdapterError>>;
@@ -32,20 +24,7 @@ export interface ProviderAdapterRegistryLiveOptions {
 
 const makeProviderAdapterRegistry = (options?: ProviderAdapterRegistryLiveOptions) =>
   Effect.gen(function* () {
-    const adapters =
-      options?.adapters !== undefined
-        ? options.adapters
-        : [
-            yield* CodexAdapter,
-            yield* ClaudeAdapter,
-            yield* CursorAdapter,
-            yield* AntigravityAdapter,
-            yield* GrokAdapter,
-            yield* DroidAdapter,
-            yield* KiloAdapter,
-            yield* OpenCodeAdapter,
-            yield* PiAdapter,
-          ];
+    const adapters = options?.adapters ?? [yield* CodexAdapter];
 
     for (const adapter of adapters) {
       assertProviderAdapterConformance(adapter);
@@ -70,7 +49,14 @@ const makeProviderAdapterRegistry = (options?: ProviderAdapterRegistryLiveOption
     } satisfies ProviderAdapterRegistryShape;
   });
 
-export const ProviderAdapterRegistryLive = Layer.effect(
+export const ProviderAdapterRegistryCodexOnlyLive = Layer.effect(
   ProviderAdapterRegistry,
-  makeProviderAdapterRegistry(),
+  Effect.gen(function* () {
+    const codex = yield* CodexAdapter;
+    return yield* makeProviderAdapterRegistry({ adapters: [codex] });
+  }),
 );
+
+// Backward-compatible export name for tests and downstream imports. The live
+// registry is deliberately Codex-only in this build.
+export const ProviderAdapterRegistryLive = ProviderAdapterRegistryCodexOnlyLive;

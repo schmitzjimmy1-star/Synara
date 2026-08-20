@@ -8,7 +8,7 @@
  * automations - the same host-tool pattern the Codex desktop app uses.
  *
  * All tools delegate to existing services (OrchestrationEngine dispatch,
- * ProjectionSnapshotQuery reads, AutomationService, GitCore); no orchestration
+ * ProjectionSnapshotQuery reads and GitCore); no orchestration
  * state lives here.
  *
  * @module agentGateway/Layers/AgentGateway
@@ -17,6 +17,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   CommandId,
+  OPENROUTER_CODEX_DEFAULT_MODEL,
   SYNARA_GATEWAY_MAX_THREADS_PER_OPERATION,
   MessageId,
   THREAD_GOAL_MAX_CHARS,
@@ -33,8 +34,6 @@ import { GitCore } from "../../git/Services/GitCore.ts";
 import { ServerConfig } from "../../config.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
-import { AutomationService } from "../../automation/Services/AutomationService.ts";
-import { buildAutomationProposalActivity } from "../../automation/proposalActivity.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
 import { OrchestrationEventStore } from "../../persistence/Services/OrchestrationEventStore.ts";
 import { OrchestrationEventDeliveryRepository } from "../../persistence/Services/OrchestrationEventDeliveries.ts";
@@ -68,10 +67,7 @@ import { WRITE_TOOL_ANNOTATIONS, type ToolEntry } from "../toolRuntime.ts";
 import { makeAgentGatewayMcpTransport } from "../mcpTransport.ts";
 import { recoverInterruptedAgentGatewayOperations } from "../startupRecovery.ts";
 import { makeCreateThreadsHandler } from "../creationCoordinator.ts";
-import { makeAgentGatewayAutomationTools } from "../automationTools.ts";
 import { makeAgentGatewayBrowserTools } from "../browserTools.ts";
-import { makeAgentGatewayDeviceTools } from "../deviceTools.ts";
-import { DeviceService } from "../../device/Services/DeviceService.ts";
 import { BrowserAutomationHost } from "../../browserAutomation/Services/BrowserAutomationHost.ts";
 import { makeBrowserAutomationHost } from "../../browserAutomation/Layers/BrowserAutomationHost.ts";
 import { makeThreadReadTools } from "../threadReadTools.ts";
@@ -110,7 +106,6 @@ export const makeAgentGateway = Effect.gen(function* () {
   const credentials = yield* AgentGatewayCredentials;
   const snapshotQuery = yield* ProjectionSnapshotQuery;
   const orchestrationEngine = yield* OrchestrationEngineService;
-  const automationService = yield* AutomationService;
   const git = yield* GitCore;
   const providerDiscovery = yield* ProviderDiscoveryService;
   const providerHealth = yield* ProviderHealth;
@@ -126,10 +121,6 @@ export const makeAgentGateway = Effect.gen(function* () {
     yield* Effect.serviceOption(BrowserAutomationHost),
     () => makeBrowserAutomationHost({}),
   );
-  // Optional and platform-gated: off macOS (and in tests that do not provide
-  // it) the agent never sees the device_* tools at all, rather than being
-  // offered eleven tools that can only report an unsupported platform.
-  const deviceService = Option.getOrUndefined(yield* Effect.serviceOption(DeviceService));
   const loadProviderAvailabilities = Effect.gen(function* () {
     const [settings, statuses] = yield* Effect.all([
       serverSettings.getSettings,
@@ -145,6 +136,12 @@ export const makeAgentGateway = Effect.gen(function* () {
           provider,
           {
             enabled: settings.providers[provider].enabled,
+            defaultModel:
+              provider === "codex" &&
+              settings.providers.codex.homePath.trim().length > 0 &&
+              settings.providers.codex.customModels.includes(OPENROUTER_CODEX_DEFAULT_MODEL)
+                ? OPENROUTER_CODEX_DEFAULT_MODEL
+                : undefined,
             ...(status
               ? {
                   available: status.available,
@@ -680,26 +677,6 @@ export const makeAgentGateway = Effect.gen(function* () {
       }).pipe(Effect.catch((error) => Effect.succeed(mcpToolResultError(errorText(error))))),
   };
 
-  const automationTools = makeAgentGatewayAutomationTools({
-    automationService,
-    requireThreadShell,
-    assertCallerMayDriveThread,
-    surfaceAutomationProposal: ({ callerThreadId, definition }) => {
-      const createdAt = isoNow();
-      return orchestrationEngine
-        .dispatch({
-          type: "thread.activity.append",
-          commandId: CommandId.makeUnsafe(`agent:${randomUUID()}:automation-proposal`),
-          threadId: callerThreadId,
-          activity: buildAutomationProposalActivity({
-            definition,
-            proposalState: "pending",
-          }),
-          createdAt,
-        })
-        .pipe(Effect.asVoid);
-    },
-  });
   const browserTools = makeAgentGatewayBrowserTools(browserAutomationHost, {
     resolveWorkspaceRoot: (context) =>
       Effect.gen(function* () {
@@ -727,11 +704,7 @@ export const makeAgentGateway = Effect.gen(function* () {
     setThreadTitle,
     setThreadArchived,
     setThreadGoal,
-    ...automationTools,
     ...browserTools,
-    ...(deviceService?.supported === true
-      ? makeAgentGatewayDeviceTools({ manager: deviceService.manager })
-      : []),
   ];
   return {
     handleMcpPost: makeAgentGatewayMcpTransport({

@@ -1735,6 +1735,14 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
               return yield* startAndPersistReplacement;
             }
 
+            const registeredProviders = yield* registry.listProviders();
+            if (!registeredProviders.includes(persistedBinding.provider)) {
+              // Persisted bindings outlive runtime adapters. A retired provider cannot
+              // still own an in-memory session, so replace it directly instead of
+              // looking up an adapter that this Codex-only build intentionally lacks.
+              return yield* startAndPersistReplacement;
+            }
+
             const previousAdapter = yield* registry.getByProvider(persistedBinding.provider);
             if (!(yield* previousAdapter.hasSession(threadId))) {
               return yield* startAndPersistReplacement;

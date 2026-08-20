@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  isOpenRouterCodexConfig,
   parseCodexConfigActiveProviderEnvKey,
   parseCodexConfigModelProvider,
   parseCodexConfigProviderEnvKey,
@@ -72,6 +73,36 @@ describe("parseCodexConfigProviderEnvKey", () => {
         "my-company-proxy",
       ),
     ).toBe("MY_COMPANY_PROXY_KEY");
+  });
+});
+
+describe("isOpenRouterCodexConfig", () => {
+  const valid = [
+    'model_provider = "openrouter"',
+    "",
+    "[model_providers.openrouter]",
+    'base_url = "https://openrouter.ai/api/v1/"',
+    'wire_api = "responses"',
+    'env_key = "OPENROUTER_API_KEY"',
+  ].join("\n");
+
+  it("accepts a scoped Responses provider with an optional trailing slash", () => {
+    expect(isOpenRouterCodexConfig(valid)).toBe(true);
+  });
+
+  it("does not borrow wire_api or auth from an unrelated section", () => {
+    expect(
+      isOpenRouterCodexConfig(
+        [
+          'model_provider = "openrouter"',
+          "[model_providers.openrouter]",
+          'base_url = "https://openrouter.ai/api/v1"',
+          "[model_providers.other]",
+          'wire_api = "responses"',
+          'env_key = "OPENROUTER_API_KEY"',
+        ].join("\n"),
+      ),
+    ).toBe(false);
   });
 });
 

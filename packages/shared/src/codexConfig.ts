@@ -20,6 +20,27 @@ function readModelProviderSectionName(trimmedLine: string): string | undefined {
   return match?.[1] ?? match?.[2] ?? match?.[3];
 }
 
+function readSectionQuotedAssignment(
+  content: string,
+  section: string,
+  key: string,
+): string | undefined {
+  let activeSection: string | undefined;
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const sectionMatch = /^\[\s*([^\]]+)\s*\]$/.exec(trimmed);
+    if (sectionMatch) {
+      activeSection = sectionMatch[1]?.trim();
+      continue;
+    }
+    if (activeSection !== section) continue;
+    const value = readQuotedAssignmentValue(trimmed, key);
+    if (value) return value;
+  }
+  return undefined;
+}
+
 export function parseCodexConfigModelProvider(content: string): string | undefined {
   let inTopLevel = true;
   for (const line of content.split("\n")) {
@@ -60,6 +81,38 @@ export function parseCodexConfigProviderEnvKey(
   }
 
   return undefined;
+}
+
+export function parseCodexConfigProviderBaseUrl(
+  content: string,
+  provider: string,
+): string | undefined {
+  let currentProviderSection: string | undefined;
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    if (trimmed.startsWith("[")) {
+      currentProviderSection = readModelProviderSectionName(trimmed);
+      continue;
+    }
+    if (currentProviderSection !== provider) continue;
+    const baseUrl = readQuotedAssignmentValue(trimmed, "base_url");
+    if (baseUrl) return baseUrl;
+  }
+  return undefined;
+}
+
+export function isOpenRouterCodexConfig(content: string): boolean {
+  const baseUrl = parseCodexConfigProviderBaseUrl(content, "openrouter")?.replace(/\/+$/, "");
+  return (
+    parseCodexConfigModelProvider(content) === "openrouter" &&
+    baseUrl === "https://openrouter.ai/api/v1" &&
+    readSectionQuotedAssignment(content, "model_providers.openrouter", "wire_api") ===
+      "responses" &&
+    (parseCodexConfigProviderEnvKey(content, "openrouter") !== undefined ||
+      readSectionQuotedAssignment(content, "model_providers.openrouter.auth", "command") !==
+        undefined)
+  );
 }
 
 export function parseCodexConfigActiveProviderEnvKey(content: string): string | undefined {

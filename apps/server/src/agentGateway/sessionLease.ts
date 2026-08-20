@@ -13,7 +13,7 @@ type AgentGatewaySessionLeaseCredentials = Pick<
   Partial<
     Pick<
       AgentGatewayCredentialsShape,
-      "cancelSessionTurnRequests" | "issueStdioBootstrapToken" | "retireSessionTurn"
+      "cancelSessionTurnRequests" | "retireSessionTurn"
     >
   >;
 
@@ -30,8 +30,6 @@ export const AGENT_GATEWAY_TURN_AUTHORITY_RETIRED = "synaraGatewayTurnAuthorityR
  */
 export interface AgentGatewaySessionLease {
   readonly connection: AgentGatewayMcpConnection;
-  /** Mint a fresh one-shot proxy credential for a provider turn. */
-  readonly issueStdioBootstrapToken?: () => string | null;
   readonly cancelTurn: (turnId: string) => Promise<void>;
   /**
    * Permanently retire write authority for a terminal turn while leaving the
@@ -154,10 +152,6 @@ export function acquireAgentGatewaySessionLease(
 
   return {
     connection,
-    issueStdioBootstrapToken: () => {
-      if (released) return null;
-      return credentials.issueStdioBootstrapToken?.(connection.bearerToken) ?? null;
-    },
     cancelTurn: (turnId) => {
       if (released) return Promise.resolve();
       return (

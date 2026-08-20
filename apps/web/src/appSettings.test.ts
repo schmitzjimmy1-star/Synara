@@ -157,7 +157,7 @@ describe("getAppModelOptions", () => {
 });
 
 describe("getGitTextGenerationModelOptions", () => {
-  it("merges codex and OpenCode model options for git writing settings", () => {
+  it("keeps Git writing options Codex-only", () => {
     const options = getGitTextGenerationModelOptions({
       customCodexModels: ["custom/codex-model"],
       customKiloModels: [],
@@ -168,10 +168,11 @@ describe("getGitTextGenerationModelOptions", () => {
 
     expect(options.some((option) => option.slug === "gpt-5.4-mini")).toBe(true);
     expect(options.some((option) => option.slug === "openai/gpt-5")).toBe(true);
-    expect(options.some((option) => option.slug === "openrouter/gpt-oss-120b")).toBe(true);
+    expect(options.some((option) => option.slug === "openrouter/gpt-oss-120b")).toBe(false);
+    expect(options.every((option) => option.provider === "codex")).toBe(true);
   });
 
-  it("prefers runtime-discovered OpenCode and Kilo models for git writing settings", () => {
+  it("ignores runtime-discovered retired-provider models for Git writing", () => {
     const options = getGitTextGenerationModelOptions(
       {
         customCodexModels: [],
@@ -186,9 +187,10 @@ describe("getGitTextGenerationModelOptions", () => {
       },
     );
 
-    expect(options.some((option) => option.slug === "openrouter/gpt-oss-120b")).toBe(true);
-    expect(options.some((option) => option.slug === "kilo/kilo-auto/free")).toBe(true);
+    expect(options.some((option) => option.slug === "openrouter/gpt-oss-120b")).toBe(false);
+    expect(options.some((option) => option.slug === "kilo/kilo-auto/free")).toBe(false);
     expect(options.some((option) => option.slug === "openrouter/custom-model")).toBe(true);
+    expect(options.every((option) => option.provider === "codex")).toBe(true);
   });
 
   it("preserves a currently selected transient git writing model", () => {
@@ -202,13 +204,13 @@ describe("getGitTextGenerationModelOptions", () => {
 
     expect(options.at(-1)).toEqual({
       slug: "openrouter/custom-model",
-      name: "Custom Model",
-      provider: "opencode",
+      name: "openrouter/custom-model",
+      provider: "codex",
       isCustom: true,
     });
   });
 
-  it("humanizes transient OpenCode git-writing models instead of showing the raw slug", () => {
+  it("keeps legacy transient Git models as Codex custom slugs", () => {
     const options = getGitTextGenerationModelOptions({
       customCodexModels: [],
       customKiloModels: [],
@@ -219,8 +221,8 @@ describe("getGitTextGenerationModelOptions", () => {
 
     expect(options.at(-1)).toEqual({
       slug: "opencode-go/kimi-k2.6",
-      name: "Kimi K2.6",
-      provider: "opencode",
+      name: "opencode-go/kimi-k2.6",
+      provider: "codex",
       isCustom: true,
     });
   });
@@ -300,7 +302,7 @@ describe("resolveAppModelSelection", () => {
         },
         "",
       ),
-    ).toBe("gpt-5.5");
+    ).toBe("openai/gpt-5.6-sol");
   });
 
   it("resolves display names through the shared resolver", () => {

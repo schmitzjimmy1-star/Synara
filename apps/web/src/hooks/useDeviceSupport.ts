@@ -4,10 +4,6 @@
 // Exports: useDeviceSupport
 // Depends on: server environment query
 
-import { useQuery } from "@tanstack/react-query";
-
-import { serverEnvironmentQueryOptions } from "~/lib/serverReactQuery";
-
 /**
  * The simulator engine lives in apps/server and shells out to the user's Xcode,
  * so support follows the *server's* platform, not the browser's. A Mac browser
@@ -16,6 +12,5 @@ import { serverEnvironmentQueryOptions } from "~/lib/serverReactQuery";
  * the add-menu entry from flickering in and out on a cold start.
  */
 export function useDeviceSupport(): boolean {
-  const environmentQuery = useQuery(serverEnvironmentQueryOptions());
-  return environmentQuery.data?.platform.os === "darwin";
+  return false;
 }

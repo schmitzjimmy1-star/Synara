@@ -9,7 +9,6 @@ import {
   BotIcon,
   BrainIcon,
   BugIcon,
-  ClockIcon,
   EraserIcon,
   FastModeIcon,
   GitForkIcon,
@@ -39,7 +38,6 @@ export const SLASH_COMMAND_ICONS: Record<string, LucideIcon> = {
   status: InfoIcon,
   subagents: BotIcon,
   feedback: BugIcon,
-  automation: ClockIcon,
   goal: GoalIcon,
 };
 

@@ -9,14 +9,16 @@ import {
   DEFAULT_GIT_TEXT_GENERATION_MODEL,
   DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_SERVER_SETTINGS,
+  OPENROUTER_CODEX_DEFAULT_MODEL,
+  OPENROUTER_CODEX_MODELS,
   type ModelSelection,
-  type ProviderWithDefaultModel,
   ServerSettings,
   ServerSettingsError,
   type ServerSettingsPatch,
   type ServerSettingsView,
 } from "@synara/contracts";
 import { deepMerge, type DeepPartial } from "@synara/shared/Struct";
+import { isOpenRouterCodexConfig } from "@synara/shared/codexConfig";
 import { applyServerSettingsPatch } from "@synara/shared/serverSettings";
 import {
   Cause,
@@ -150,29 +152,30 @@ export class ServerSettingsService extends ServiceMap.Service<
     );
 }
 
-const PROVIDER_ORDER: readonly ProviderWithDefaultModel[] = [
-  "codex",
-  "claudeAgent",
-  "kilo",
-  "opencode",
-];
-
 function resolveTextGenerationProvider(settings: ServerSettings): ServerSettings {
-  const selection = settings.textGenerationModelSelection;
-  if (settings.providers[selection.provider].enabled) {
-    return settings;
-  }
-
-  const fallback = PROVIDER_ORDER.find((provider) => settings.providers[provider].enabled);
-  if (!fallback) {
-    return settings;
-  }
-
-  return {
+  const codexOnlySettings: ServerSettings = {
     ...settings,
+    providers: {
+      ...settings.providers,
+      claudeAgent: { ...settings.providers.claudeAgent, enabled: false },
+      cursor: { ...settings.providers.cursor, enabled: false },
+      antigravity: { ...settings.providers.antigravity, enabled: false },
+      grok: { ...settings.providers.grok, enabled: false },
+      droid: { ...settings.providers.droid, enabled: false },
+      kilo: { ...settings.providers.kilo, enabled: false },
+      opencode: { ...settings.providers.opencode, enabled: false },
+      pi: { ...settings.providers.pi, enabled: false },
+    },
+  };
+  const selection = settings.textGenerationModelSelection;
+  if (selection.provider === "codex") {
+    return codexOnlySettings;
+  }
+  return {
+    ...codexOnlySettings,
     textGenerationModelSelection: {
-      provider: fallback,
-      model: DEFAULT_MODEL_BY_PROVIDER[fallback],
+      provider: "codex",
+      model: DEFAULT_MODEL_BY_PROVIDER.codex,
     } as ModelSelection,
   };
 }
@@ -263,7 +266,7 @@ function decodeSettingsFromJson(settingsPath: string, raw: string) {
 }
 
 const makeServerSettings = Effect.gen(function* () {
-  const { settingsPath } = yield* ServerConfig;
+  const { settingsPath, homeDir } = yield* ServerConfig;
   const providerCredentials = yield* ProviderCredentials;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -308,6 +311,33 @@ const makeServerSettings = Effect.gen(function* () {
       ),
     );
 
+  const detectedOpenRouterHome = path.join(homeDir, ".codex-openrouter");
+  const defaultSettings = fs
+    .readFileString(path.join(detectedOpenRouterHome, "config.toml"))
+    .pipe(
+      Effect.map(isOpenRouterCodexConfig),
+      Effect.catch(() => Effect.succeed(false)),
+      Effect.map((hasValidatedOpenRouterHome): ServerSettings =>
+        hasValidatedOpenRouterHome
+          ? {
+              ...DEFAULT_SERVER_SETTINGS,
+              textGenerationModelSelection: {
+                provider: "codex",
+                model: OPENROUTER_CODEX_DEFAULT_MODEL,
+              },
+              providers: {
+                ...DEFAULT_SERVER_SETTINGS.providers,
+                codex: {
+                  ...DEFAULT_SERVER_SETTINGS.providers.codex,
+                  homePath: detectedOpenRouterHome,
+                  customModels: [...OPENROUTER_CODEX_MODELS],
+                },
+              },
+            }
+          : DEFAULT_SERVER_SETTINGS,
+      ),
+    );
+
   const loadSettingsFromDisk = Effect.gen(function* () {
     const exists = yield* fs.exists(settingsPath).pipe(
       Effect.mapError(
@@ -321,7 +351,7 @@ const makeServerSettings = Effect.gen(function* () {
     );
     if (!exists) {
       return {
-        settings: yield* withCredentialState(DEFAULT_SERVER_SETTINGS),
+        settings: yield* defaultSettings.pipe(Effect.flatMap(withCredentialState)),
         revision: 0,
         migrated: false,
       };
@@ -347,7 +377,7 @@ const makeServerSettings = Effect.gen(function* () {
         error: decoded.error,
       });
       return {
-        settings: yield* withCredentialState(DEFAULT_SERVER_SETTINGS),
+        settings: yield* defaultSettings.pipe(Effect.flatMap(withCredentialState)),
         revision: 0,
         migrated: false,
       };
@@ -367,12 +397,57 @@ const makeServerSettings = Effect.gen(function* () {
           }),
       ),
     );
+    const migratedSettings = migrateSettings(decoded.value, decoded.migrationVersion);
+    const detectedDefaults = yield* defaultSettings;
+    const shouldAdoptOpenRouterHome =
+      migratedSettings.providers.codex.homePath.trim().length === 0 &&
+      detectedDefaults.providers.codex.homePath.trim().length > 0;
+    const effectiveCodexHome = shouldAdoptOpenRouterHome
+      ? detectedDefaults.providers.codex.homePath
+      : migratedSettings.providers.codex.homePath.trim();
+    const hasValidatedOpenRouterProfile = effectiveCodexHome
+      ? yield* fs
+          .readFileString(path.join(effectiveCodexHome, "config.toml"))
+          .pipe(Effect.map(isOpenRouterCodexConfig), Effect.catch(() => Effect.succeed(false)))
+      : false;
+    const settingsWithDetectedOpenRouter = hasValidatedOpenRouterProfile
+      ? {
+          ...migratedSettings,
+          textGenerationModelSelection: {
+            provider: "codex" as const,
+            model:
+              migratedSettings.textGenerationModelSelection.provider === "codex" &&
+              migratedSettings.textGenerationModelSelection.model.includes("/")
+                ? migratedSettings.textGenerationModelSelection.model
+                : OPENROUTER_CODEX_DEFAULT_MODEL,
+          },
+          providers: {
+            ...migratedSettings.providers,
+            codex: {
+              ...migratedSettings.providers.codex,
+              homePath: effectiveCodexHome,
+              customModels:
+                migratedSettings.providers.codex.customModels.length > 0
+                  ? migratedSettings.providers.codex.customModels
+                  : [...OPENROUTER_CODEX_MODELS],
+            },
+          },
+        }
+      : migratedSettings;
+    const normalizedOpenRouterSettings =
+      hasValidatedOpenRouterProfile &&
+      (settingsWithDetectedOpenRouter.textGenerationModelSelection.model !==
+        migratedSettings.textGenerationModelSelection.model ||
+        settingsWithDetectedOpenRouter.providers.codex.homePath !==
+          migratedSettings.providers.codex.homePath ||
+        (migratedSettings.providers.codex.customModels.length === 0 &&
+          settingsWithDetectedOpenRouter.providers.codex.customModels.length > 0));
     return {
-      settings: yield* withCredentialState(
-        migrateSettings(decoded.value, decoded.migrationVersion),
-      ),
+      settings: yield* withCredentialState(settingsWithDetectedOpenRouter),
       revision: decoded.revision,
       migrated:
+        shouldAdoptOpenRouterHome ||
+        normalizedOpenRouterSettings ||
         legacyPasswords.size > 0 ||
         decoded.legacyFormat ||
         decoded.migrationVersion !== SERVER_SETTINGS_MIGRATION_VERSION,

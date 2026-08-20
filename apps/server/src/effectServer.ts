@@ -7,9 +7,6 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { agentGatewayRouteLayer } from "./agentGateway/httpRoute";
 import { AgentGatewayCredentials } from "./agentGateway/Services/AgentGatewayCredentials";
-import { AutomationRunReactor } from "./automation/Services/AutomationRunReactor";
-import { AutomationScheduler } from "./automation/Services/AutomationScheduler";
-import { AutomationService } from "./automation/Services/AutomationService";
 import {
   clearPersistedServerRuntimeState,
   makePersistedServerRuntimeState,
@@ -60,9 +57,6 @@ export interface ServerShape {
     | Path.Path
     | Keybindings
     | ManagedAttachmentCleanup
-    | AutomationRunReactor
-    | AutomationScheduler
-    | AutomationService
     | ServerLifecycleEvents
     | OrchestrationEngineService
     | OrchestrationReactor
@@ -120,8 +114,6 @@ export const createEffectServer = Effect.fn(function* (
     });
   }
   const agentGatewayCredentials = yield* AgentGatewayCredentials;
-  const automationRunReactor = yield* AutomationRunReactor;
-  const automationScheduler = yield* AutomationScheduler;
   const keybindings = yield* Keybindings;
   const managedAttachmentCleanup = yield* ManagedAttachmentCleanup;
   const lifecycleEvents = yield* ServerLifecycleEvents;
@@ -202,8 +194,6 @@ export const createEffectServer = Effect.fn(function* (
     }),
   );
   yield* Scope.provide(orchestrationReactor.start, subscriptionsScope);
-  yield* Scope.provide(automationScheduler.start(), subscriptionsScope);
-  yield* Scope.provide(automationRunReactor.start(), subscriptionsScope);
   yield* Scope.provide(threadDeletionReactor.start(), subscriptionsScope);
   yield* Scope.provide(providerSessionReaper.start(), subscriptionsScope);
   yield* Scope.provide(providerRuntimeReconciler.start(), subscriptionsScope);

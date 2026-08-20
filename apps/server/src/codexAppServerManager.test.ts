@@ -2144,7 +2144,45 @@ describe("CodexAppServerManager discovery", () => {
     });
     expect(sendRequest).toHaveBeenCalledWith(context, "model/list", {
       cursor: null,
-      limit: 50,
+      limit: 100,
+      includeHidden: false,
+    });
+  });
+
+  it("paginates model discovery and deduplicates models by slug", async () => {
+    const manager = new CodexAppServerManager();
+    const context = { session: { status: "ready" } };
+    vi.spyOn(
+      manager as unknown as { resolveContextForDiscovery: () => unknown },
+      "resolveContextForDiscovery",
+    ).mockReturnValue(context);
+    const sendRequest = vi
+      .spyOn(
+        manager as unknown as { sendRequest: (...args: unknown[]) => Promise<unknown> },
+        "sendRequest",
+      )
+      .mockResolvedValueOnce({
+        result: { items: [{ id: "openai/gpt-5.6-sol", name: "GPT-5.6 Sol" }], nextCursor: "p2" },
+      })
+      .mockResolvedValueOnce({
+        result: {
+          items: [
+            { id: "openai/gpt-5.6-sol", name: "Duplicate" },
+            { id: "qwen/qwen3.8-max", name: "Qwen 3.8 Max" },
+          ],
+          nextCursor: null,
+        },
+      });
+
+    const result = await manager.listModels();
+
+    expect(result.models.map((model) => model.slug)).toEqual([
+      "openai/gpt-5.6-sol",
+      "qwen/qwen3.8-max",
+    ]);
+    expect(sendRequest).toHaveBeenNthCalledWith(2, context, "model/list", {
+      cursor: "p2",
+      limit: 100,
       includeHidden: false,
     });
   });

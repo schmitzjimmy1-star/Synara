@@ -25,7 +25,6 @@ describe("composerSlashCommands", () => {
   it("recognizes built-in slash commands", () => {
     expect(isBuiltInComposerSlashCommand("review")).toBe(true);
     expect(isBuiltInComposerSlashCommand("fast")).toBe(true);
-    expect(isBuiltInComposerSlashCommand("automation")).toBe(true);
     expect(isBuiltInComposerSlashCommand("export")).toBe(true);
     expect(isBuiltInComposerSlashCommand("feedback")).toBe(true);
     expect(isBuiltInComposerSlashCommand("debug")).toBe(true);
@@ -36,9 +35,7 @@ describe("composerSlashCommands", () => {
   it("filters slash commands by query", () => {
     expect(filterComposerSlashCommands("rev").map((entry) => entry.command)).toEqual(["review"]);
     expect(filterComposerSlashCommands("fast").map((entry) => entry.command)).toEqual(["fast"]);
-    expect(filterComposerSlashCommands("auto").map((entry) => entry.command)).toEqual([
-      "automation",
-    ]);
+    expect(filterComposerSlashCommands("auto")).toEqual([]);
     expect(filterComposerSlashCommands("feed").map((entry) => entry.command)).toEqual(["feedback"]);
     expect(filterComposerSlashCommands("debug").map((entry) => entry.command)).toEqual(["debug"]);
   });
@@ -64,10 +61,7 @@ describe("composerSlashCommands", () => {
       command: "side",
       args: "is this safe?",
     });
-    expect(parseComposerSlashInvocation("/automation every 6h check the page")).toEqual({
-      command: "automation",
-      args: "every 6h check the page",
-    });
+    expect(parseComposerSlashInvocation("/automation every 6h check the page")).toBeNull();
     expect(parseComposerSlashInvocation("/feedback")).toEqual({
       command: "feedback",
       args: "",
@@ -322,22 +316,6 @@ describe("composerSlashCommands", () => {
     expect(providerSupportsTextNativeReviewCommand("claudeAgent", ["review"])).toBe(true);
   });
 
-  it("keeps app-level /automation available even if a provider exposes a native collision", () => {
-    const availableCommands = getAvailableComposerSlashCommands({
-      provider: "antigravity",
-      supportsFastSlashCommand: false,
-      canOfferCompactCommand: false,
-      canOfferReviewCommand: true,
-      canOfferForkCommand: true,
-      canOfferSideCommand: true,
-      canOfferExportCommand: true,
-      providerNativeCommandNames: ["automation"],
-    });
-
-    expect(availableCommands).toContain("automation");
-    expect(shouldHideProviderNativeCommandFromComposerMenu("antigravity", "automation")).toBe(true);
-  });
-
   it("keeps Feedback Synara ahead of provider-native /feedback", () => {
     const availableCommands = getAvailableComposerSlashCommands({
       provider: "claudeAgent",
@@ -373,7 +351,6 @@ describe("composerSlashCommands", () => {
       "debug",
       "default",
       "feedback",
-      "automation",
     ]);
   });
 
@@ -502,7 +479,6 @@ describe("composerSlashCommands", () => {
       "export",
       "goal",
       "feedback",
-      "automation",
     ]);
   });
 

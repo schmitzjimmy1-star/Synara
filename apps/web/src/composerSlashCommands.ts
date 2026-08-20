@@ -98,7 +98,6 @@ function shouldKeepBuiltInSlashCommandDespiteNativeCollision(
   return (
     command === "debug" ||
     command === "default" ||
-    command === "automation" ||
     command === "export" ||
     command === "feedback" ||
     // /fork is app-owned everywhere: it creates a Synara thread with fork
@@ -118,7 +117,6 @@ export function shouldHideProviderNativeCommandFromComposerMenu(
   const normalizedCommand = normalizeComposerSlashCommandName(command);
   const appCommandIsAvailable = options.availableAppCommands?.has(normalizedCommand) ?? true;
   return (
-    normalizedCommand === "automation" ||
     normalizedCommand === "debug" ||
     normalizedCommand === "default" ||
     (normalizedCommand === "export" && appCommandIsAvailable) ||
@@ -246,12 +244,6 @@ const COMPOSER_SLASH_COMMAND_DEFINITIONS: Record<
     command: "feedback",
     label: "/feedback",
     description: "Send feedback to the Synara team",
-    source: "app",
-  },
-  automation: {
-    command: "automation",
-    label: "/automation",
-    description: "Create a scheduled automation from this prompt",
     source: "app",
   },
 };
@@ -469,7 +461,6 @@ export function getAvailableComposerSlashCommands(input: {
           ...(input.canOfferExportCommand ? (["export"] as const) : []),
           "goal",
           "feedback",
-          "automation",
         ]
       : [
           // Claude owns most slash-command UX natively; sidechat remains app-level because it
@@ -485,7 +476,6 @@ export function getAvailableComposerSlashCommands(input: {
           "debug",
           "default",
           "feedback",
-          "automation",
         ];
   return availableCommands.filter((command) => !collidingNativeCommandNames.has(command));
 }

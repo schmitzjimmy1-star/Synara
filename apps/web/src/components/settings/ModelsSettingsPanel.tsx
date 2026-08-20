@@ -46,7 +46,10 @@ type CustomModelValidationResult =
   | { readonly model: string; readonly error?: never }
   | { readonly model?: never; readonly error: string };
 
-const GIT_WRITING_DISCOVERY_PROVIDERS = ["codex", "kilo", "opencode"] as const;
+const GIT_WRITING_DISCOVERY_PROVIDERS = ["codex"] as const;
+const CODEX_CUSTOM_MODEL_EDITOR_SETTINGS = CUSTOM_MODEL_EDITOR_PROVIDER_SETTINGS.filter(
+  (config) => config.provider === "codex",
+);
 
 export function validateCustomModelInput(input: {
   readonly provider: ProviderKind;
@@ -70,7 +73,7 @@ export function validateCustomModelInput(input: {
 }
 
 function isCustomModelEditorProvider(value: string | null): value is ProviderKind {
-  return CUSTOM_MODEL_EDITOR_PROVIDER_SETTINGS.some((config) => config.provider === value);
+  return CODEX_CUSTOM_MODEL_EDITOR_SETTINGS.some((config) => config.provider === value);
 }
 
 export function ModelsSettingsPanel({
@@ -105,7 +108,7 @@ export function ModelsSettingsPanel({
     textGenerationModel,
     textGenerationProvider,
   } = settings;
-  const currentGitTextGenerationProvider = textGenerationProvider ?? "codex";
+  const currentGitTextGenerationProvider = "codex" as const;
   const currentGitTextGenerationModel = textGenerationModel ?? DEFAULT_GIT_TEXT_GENERATION_MODEL;
   const gitWritingModelHintByProvider = useMemo<Partial<Record<ProviderKind, string | null>>>(
     () => ({ [currentGitTextGenerationProvider]: currentGitTextGenerationModel }),
@@ -135,8 +138,6 @@ export function ModelsSettingsPanel({
         },
         {
           codex: gitWritingCatalogOptionsByProvider.codex,
-          kilo: gitWritingCatalogOptionsByProvider.kilo,
-          opencode: gitWritingCatalogOptionsByProvider.opencode,
         },
       ),
     [
@@ -144,8 +145,6 @@ export function ModelsSettingsPanel({
       customKiloModels,
       customOpenCodeModels,
       gitWritingCatalogOptionsByProvider.codex,
-      gitWritingCatalogOptionsByProvider.kilo,
-      gitWritingCatalogOptionsByProvider.opencode,
       textGenerationModel,
       textGenerationProvider,
     ],
@@ -158,14 +157,14 @@ export function ModelsSettingsPanel({
         option.provider === currentGitTextGenerationProvider &&
         option.slug === currentGitTextGenerationModel,
     )?.name ?? currentGitTextGenerationModel;
-  const selectedCustomModelProviderSettings = CUSTOM_MODEL_EDITOR_PROVIDER_SETTINGS.find(
+  const selectedCustomModelProviderSettings = CODEX_CUSTOM_MODEL_EDITOR_SETTINGS.find(
     (config) => config.provider === selectedCustomModelProvider,
   )!;
   const selectedCustomModelInput = customModelInputByProvider[selectedCustomModelProvider] ?? "";
   const selectedCustomModelError = customModelErrorByProvider[selectedCustomModelProvider] ?? null;
   const savedCustomModelRows = useMemo(
     () =>
-      CUSTOM_MODEL_EDITOR_PROVIDER_SETTINGS.flatMap((config) =>
+      CODEX_CUSTOM_MODEL_EDITOR_SETTINGS.flatMap((config) =>
         getCustomModelsForProvider(settings, config.provider).map((slug) => ({
           key: `${config.provider}:${slug}`,
           provider: config.provider,
@@ -218,7 +217,7 @@ export function ModelsSettingsPanel({
   const resetCustomModels = useCallback(() => {
     const patch = Object.assign(
       {},
-      ...CUSTOM_MODEL_EDITOR_PROVIDER_SETTINGS.map((config) =>
+      ...CODEX_CUSTOM_MODEL_EDITOR_SETTINGS.map((config) =>
         patchCustomModels(config.provider, [
           ...getDefaultCustomModelsForProvider(defaults, config.provider),
         ]),
@@ -282,7 +281,7 @@ export function ModelsSettingsPanel({
                 const separatorIndex = value.indexOf(":");
                 const provider = value.slice(0, separatorIndex) as ProviderKind;
                 const model = value.slice(separatorIndex + 1);
-                if (!provider || !model) return;
+                if (provider !== "codex" || !model) return;
                 updateSettings({
                   textGenerationProvider: provider,
                   textGenerationModel: model,
@@ -334,7 +333,7 @@ export function ModelsSettingsPanel({
                   <SelectValue>{selectedCustomModelProviderSettings.title}</SelectValue>
                 </SelectTrigger>
                 <SettingsSelectPopup align="start">
-                  {CUSTOM_MODEL_EDITOR_PROVIDER_SETTINGS.map((config) => (
+                  {CODEX_CUSTOM_MODEL_EDITOR_SETTINGS.map((config) => (
                     <SelectItem hideIndicator key={config.provider} value={config.provider}>
                       {config.title}
                     </SelectItem>
