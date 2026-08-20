@@ -30,6 +30,7 @@ describe("createDesktopPlatformBuildConfig", () => {
     assert.deepStrictEqual(config.asarUnpack, ["node_modules/node-pty/**"]);
     assert.equal(mac.hardenedRuntime, true);
     assert.equal(mac.notarize, true);
+    assert.equal(mac.identity, undefined);
     assert.equal(dmg.sign, true);
     assert.equal(dmg.writeUpdateInfo, false);
     assert.equal(mac.entitlements, MAC_ENTITLEMENTS_PATH);
@@ -61,6 +62,7 @@ describe("createDesktopPlatformBuildConfig", () => {
     });
 
     assert.deepStrictEqual(config.dmg, { sign: false, writeUpdateInfo: false });
+    assert.equal((config.mac as Record<string, unknown>).identity, "-");
   });
 
   it("leaves non-macOS platform configs unchanged", () => {

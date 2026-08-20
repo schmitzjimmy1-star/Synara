@@ -72,6 +72,10 @@ export function createDesktopPlatformBuildConfig(
       target: input.target === "dmg" ? [input.target, "zip"] : [input.target],
       icon: MAC_DMG_ICON_PATH,
       category: "public.app-category.developer-tools",
+      // Local builds still need a complete bundle signature. `-` asks
+      // electron-builder for an ad-hoc signature: no Developer ID, keychain
+      // prompt, or notarization, while keeping macOS resource sealing valid.
+      identity: input.signed === true ? undefined : "-",
       hardenedRuntime: input.signed === true,
       notarize: input.signed === true,
       entitlements: MAC_ENTITLEMENTS_PATH,
