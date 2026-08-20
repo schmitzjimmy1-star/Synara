@@ -25,7 +25,7 @@ const probeCodex = Effect.fn("CodexProviderHealth.probe")(function* () {
   const env = yield* Effect.promise(() =>
     buildCodexProcessEnv({
       ...(homePath ? { homePath } : {}),
-      ...(profile ? { profile } : {}),
+      prepareOverlay: false,
     }),
   );
 

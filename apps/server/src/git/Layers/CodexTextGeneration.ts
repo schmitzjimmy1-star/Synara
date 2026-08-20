@@ -356,7 +356,10 @@ const makeCodexTextGeneration = Effect.gen(function* () {
         }
 
         const env = yield* Effect.promise(() =>
-          buildCodexProcessEnv({ homePath: isolatedCodexHome.homePath }),
+          buildCodexProcessEnv({
+            homePath: isolatedCodexHome.homePath,
+            prepareOverlay: false,
+          }),
         );
         const args = [
           ...(resolvedCodexProfile ? ["--profile", resolvedCodexProfile] : []),

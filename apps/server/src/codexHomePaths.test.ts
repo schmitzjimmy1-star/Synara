@@ -26,6 +26,23 @@ describe("Codex home paths", () => {
     );
   });
 
+  it("isolates named profiles by source home", () => {
+    const first = resolveSynaraCodexHomeOverlayPath(
+      { SYNARA_HOME: "/synara/runtime" },
+      "/users/one/.codex",
+      "openrouter",
+    );
+    const second = resolveSynaraCodexHomeOverlayPath(
+      { SYNARA_HOME: "/synara/runtime" },
+      "/users/two/.codex",
+      "openrouter",
+    );
+
+    assert.notEqual(first, second);
+    assert.match(first, /codex-home-overlay-[a-f0-9]{12}-openrouter$/);
+    assert.match(second, /codex-home-overlay-[a-f0-9]{12}-openrouter$/);
+  });
+
   it("derives a default overlay beside the source home", () => {
     assert.equal(
       resolveSynaraCodexHomeOverlayPath({}, "/users/me/.codex"),

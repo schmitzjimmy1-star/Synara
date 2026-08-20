@@ -5,6 +5,7 @@
 // Depends on: Codex home path helpers, shared Codex config parsing, login-shell env reader.
 
 import * as fs from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { parse as parseToml, stringify as stringifyToml, type TomlTable } from "smol-toml";
 
@@ -515,7 +516,17 @@ async function prepareSynaraCodexHomeOverlayUnlocked(input: {
   readonly appendConfigToml?: string;
 }): Promise<string | undefined> {
   const sourceHomePath = resolveBaseCodexHomePath(input.env, input.homePath);
-  const overlayHomePath = resolveSynaraCodexHomeOverlayPath(input.env, sourceHomePath);
+  const normalizedProfile = input.profile?.trim();
+  if (normalizedProfile && !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(normalizedProfile)) {
+    throw new Error(
+      "Invalid Codex profile name. Use only letters, numbers, underscores, and hyphens.",
+    );
+  }
+  const overlayHomePath = resolveSynaraCodexHomeOverlayPath(
+    input.env,
+    sourceHomePath,
+    normalizedProfile,
+  );
   if (path.resolve(sourceHomePath) === path.resolve(overlayHomePath)) {
     return undefined;
   }
@@ -551,12 +562,6 @@ async function prepareSynaraCodexHomeOverlayUnlocked(input: {
     }
     throw cause;
   });
-  const normalizedProfile = input.profile?.trim();
-  if (normalizedProfile && !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(normalizedProfile)) {
-    throw new Error(
-      "Invalid Codex profile name. Use only letters, numbers, underscores, and hyphens.",
-    );
-  }
   const profileConfig = normalizedProfile
     ? await fs.readFile(path.join(sourceHomePath, `${normalizedProfile}.config.toml`), "utf8")
     : "";
@@ -565,17 +570,7 @@ async function prepareSynaraCodexHomeOverlayUnlocked(input: {
     : sourceConfig;
   const overlayConfigPath = path.join(overlayHomePath, "config.toml");
   let overlayConfig = layeredConfig;
-  const managedSection =
-    input.appendConfigToml ??
-    (await fs
-      .readFile(overlayConfigPath, "utf8")
-      .then(extractManagedCodexConfigSection)
-      .catch((cause: unknown) => {
-        if ((cause as NodeJS.ErrnoException).code === "ENOENT") {
-          return undefined;
-        }
-        throw cause;
-      }));
+  const managedSection = input.appendConfigToml;
   if (managedSection) {
     overlayConfig = appendManagedCodexConfigSection(overlayConfig, managedSection);
     const tokenEnvVar = /bearer_token_env_var\s*=\s*"([^"]+)"/.exec(managedSection)?.[1];
@@ -583,7 +578,14 @@ async function prepareSynaraCodexHomeOverlayUnlocked(input: {
       overlayConfig = mergeShellEnvPolicyExclude(overlayConfig, tokenEnvVar);
     }
   }
-  await fs.writeFile(overlayConfigPath, overlayConfig, "utf8");
+  const temporaryConfigPath = `${overlayConfigPath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await fs.writeFile(temporaryConfigPath, overlayConfig, "utf8");
+    await fs.rename(temporaryConfigPath, overlayConfigPath);
+  } catch (cause) {
+    await fs.rm(temporaryConfigPath, { force: true }).catch(() => undefined);
+    throw cause;
+  }
 
   return overlayHomePath;
 }
@@ -595,7 +597,11 @@ async function prepareSynaraCodexHomeOverlay(input: {
   readonly appendConfigToml?: string;
 }): Promise<string | undefined> {
   const sourceHomePath = resolveBaseCodexHomePath(input.env, input.homePath);
-  const overlayHomePath = resolveSynaraCodexHomeOverlayPath(input.env, sourceHomePath);
+  const overlayHomePath = resolveSynaraCodexHomeOverlayPath(
+    input.env,
+    sourceHomePath,
+    input.profile,
+  );
   if (path.resolve(sourceHomePath) === path.resolve(overlayHomePath)) {
     return undefined;
   }
@@ -616,17 +622,18 @@ export async function buildCodexProcessEnv(
   } = {},
 ): Promise<NodeJS.ProcessEnv> {
   const baseEnv = { ...(input.env ?? process.env) };
-  const overlayHomePath =
-    input.prepareOverlay === false
-      ? undefined
-      : await prepareSynaraCodexHomeOverlay({
-          env: baseEnv,
-          ...(input.homePath ? { homePath: input.homePath } : {}),
-          ...(input.profile ? { profile: input.profile } : {}),
-          ...(input.appendConfigToml ? { appendConfigToml: input.appendConfigToml } : {}),
-        });
+  const shouldPrepareOverlay =
+    input.prepareOverlay ?? Boolean(input.profile?.trim() || input.appendConfigToml?.trim());
+  const overlayHomePath = !shouldPrepareOverlay
+    ? undefined
+    : await prepareSynaraCodexHomeOverlay({
+        env: baseEnv,
+        ...(input.homePath ? { homePath: input.homePath } : {}),
+        ...(input.profile ? { profile: input.profile } : {}),
+        ...(input.appendConfigToml ? { appendConfigToml: input.appendConfigToml } : {}),
+      });
   const configuredEnv =
-    input.prepareOverlay === false && input.homePath
+    !shouldPrepareOverlay && input.homePath
       ? { ...baseEnv, CODEX_HOME: input.homePath }
       : overlayHomePath || input.homePath
         ? { ...baseEnv, CODEX_HOME: overlayHomePath ?? input.homePath }

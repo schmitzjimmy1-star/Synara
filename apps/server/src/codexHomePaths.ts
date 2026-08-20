@@ -7,6 +7,7 @@
 // Layer: Server utility (no IO; safe to import from anywhere)
 // Exports: overlay constants, base/overlay home resolvers, write-home + allowlist helpers.
 
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -27,9 +28,21 @@ export function resolveBaseCodexHomePath(
 export function resolveSynaraCodexHomeOverlayPath(
   env: NodeJS.ProcessEnv,
   sourceHomePath: string,
+  profile?: string,
 ): string {
   const runtimeHome = env.SYNARA_HOME?.trim();
   const overlayRoot = runtimeHome || path.join(path.dirname(sourceHomePath), ".synara", "runtime");
+  const normalizedProfile = profile?.trim();
+  if (normalizedProfile && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(normalizedProfile)) {
+    const sourceKey = createHash("sha256")
+      .update(path.resolve(sourceHomePath))
+      .digest("hex")
+      .slice(0, 12);
+    return path.join(
+      overlayRoot,
+      `${SYNARA_CODEX_HOME_OVERLAY_DIR}-${sourceKey}-${normalizedProfile}`,
+    );
+  }
   return path.join(overlayRoot, SYNARA_CODEX_HOME_OVERLAY_DIR);
 }
 

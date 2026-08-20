@@ -944,7 +944,7 @@ describe("buildCodexProcessEnv", () => {
         "SSH_AUTH_SOCK",
         "MY_COMPANY_PROXY_KEY",
       ]);
-      expect(env.CODEX_HOME).toContain("codex-home-overlay");
+      expect(env.CODEX_HOME).toBe(tempDir);
       expect(env.MY_COMPANY_PROXY_KEY).toBe("proxy-secret");
       expect(env.PATH).toBe("/opt/homebrew/bin:/usr/bin");
     } finally {
@@ -1036,6 +1036,7 @@ describe("buildCodexProcessEnv", () => {
         env: { SYNARA_HOME: runtimeHome },
         homePath: tempDir,
         platform: "darwin",
+        prepareOverlay: true,
       });
 
       expect(env.CODEX_HOME).toBe(path.join(runtimeHome, "codex-home-overlay"));
@@ -1078,6 +1079,7 @@ describe("buildCodexProcessEnv", () => {
         env: { SYNARA_HOME: runtimeHome },
         homePath: tempDir,
         platform: "darwin",
+        prepareOverlay: true,
       });
 
       expect(env.CODEX_HOME).toBe(overlayHome);
@@ -1106,6 +1108,7 @@ describe("buildCodexProcessEnv", () => {
         env: { SYNARA_HOME: runtimeHome },
         homePath: tempDir,
         platform: "darwin",
+        prepareOverlay: true,
       });
 
       expect(env.CODEX_HOME).toBe(overlayHome);
@@ -1137,6 +1140,7 @@ describe("buildCodexProcessEnv", () => {
         env: { SYNARA_HOME: runtimeHome },
         homePath: tempDir,
         platform: "darwin",
+        prepareOverlay: true,
       });
 
       expect(env.CODEX_HOME).toBe(overlayHome);

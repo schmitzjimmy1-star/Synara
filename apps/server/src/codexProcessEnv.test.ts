@@ -102,6 +102,28 @@ describe("prioritizeCodexOverlayEntries", () => {
 });
 
 describe("buildCodexProcessEnv", () => {
+  it("uses the real Codex home when no profile overlay is required", async () => {
+    const sourceHome = mkdtempSync(path.join(os.tmpdir(), "synara-codex-source-"));
+    const runtimeHome = mkdtempSync(path.join(os.tmpdir(), "synara-codex-runtime-"));
+    writeFileSync(path.join(sourceHome, "config.toml"), 'model = "gpt-5.6-sol"\n', "utf8");
+
+    try {
+      const env = await buildCodexProcessEnv({
+        env: { SYNARA_HOME: runtimeHome },
+        homePath: sourceHome,
+        platform: "win32",
+      });
+
+      expect(env.CODEX_HOME).toBe(sourceHome);
+      expect(() =>
+        readFileSync(path.join(runtimeHome, "codex-home-overlay", "config.toml")),
+      ).toThrow();
+    } finally {
+      rmSync(sourceHome, { recursive: true, force: true });
+      rmSync(runtimeHome, { recursive: true, force: true });
+    }
+  });
+
   it("does not mutate a session overlay for read-only CLI probes", async () => {
     const sourceHome = mkdtempSync(path.join(os.tmpdir(), "synara-codex-source-"));
     const runtimeHome = mkdtempSync(path.join(os.tmpdir(), "synara-codex-runtime-"));
@@ -119,6 +141,46 @@ describe("buildCodexProcessEnv", () => {
       expect(() =>
         readFileSync(path.join(runtimeHome, "codex-home-overlay", "config.toml")),
       ).toThrow();
+    } finally {
+      rmSync(sourceHome, { recursive: true, force: true });
+      rmSync(runtimeHome, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps profile sessions isolated from concurrent profile-less discovery", async () => {
+    const sourceHome = mkdtempSync(path.join(os.tmpdir(), "synara-codex-source-"));
+    const runtimeHome = mkdtempSync(path.join(os.tmpdir(), "synara-codex-runtime-"));
+    writeFileSync(path.join(sourceHome, "config.toml"), 'model = "gpt-5.6-sol"\n', "utf8");
+    writeFileSync(
+      path.join(sourceHome, "openrouter.config.toml"),
+      ['model = "openai/gpt-5.6-sol"', 'model_provider = "openrouter"'].join("\n"),
+      "utf8",
+    );
+
+    try {
+      const [profileEnv, discoveryEnv] = await Promise.all([
+        buildCodexProcessEnv({
+          env: { SYNARA_HOME: runtimeHome },
+          homePath: sourceHome,
+          profile: "openrouter",
+          platform: "win32",
+        }),
+        buildCodexProcessEnv({
+          env: { SYNARA_HOME: runtimeHome },
+          homePath: sourceHome,
+          platform: "win32",
+        }),
+      ]);
+
+      expect(discoveryEnv.CODEX_HOME).toBe(sourceHome);
+      expect(profileEnv.CODEX_HOME).not.toBe(sourceHome);
+      expect(profileEnv.CODEX_HOME).toMatch(/codex-home-overlay-[a-f0-9]{12}-openrouter$/);
+      expect(readFileSync(path.join(profileEnv.CODEX_HOME!, "config.toml"), "utf8")).toContain(
+        'model_provider = "openrouter"',
+      );
+      expect(readFileSync(path.join(sourceHome, "config.toml"), "utf8")).toBe(
+        'model = "gpt-5.6-sol"\n',
+      );
     } finally {
       rmSync(sourceHome, { recursive: true, force: true });
       rmSync(runtimeHome, { recursive: true, force: true });
