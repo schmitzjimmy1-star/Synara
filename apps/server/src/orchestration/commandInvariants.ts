@@ -90,6 +90,10 @@ export function checkpointRevertDeleteInProgressDetail(threadId: ThreadId): stri
   return `Thread '${threadId}' has a checkpoint revert in progress. Wait for it to finish before deleting the thread.`;
 }
 
+export function checkpointRevertArchiveInProgressDetail(threadId: ThreadId): string {
+  return `Thread '${threadId}' has a checkpoint revert in progress. Wait for it to finish before archiving the thread.`;
+}
+
 export function findThreadById(
   readModel: OrchestrationReadModel,
   threadId: ThreadId,

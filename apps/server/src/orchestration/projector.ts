@@ -571,6 +571,7 @@ export function projectEvent(
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
             archivedAt: null,
+            archiveCommandId: null,
             settledAt: null,
             deletedAt: null,
             handoff: payload.handoff,
@@ -610,6 +611,7 @@ export function projectEvent(
             ...nextBase,
             threads: updateThread(nextBase.threads, payload.threadId, {
               archivedAt,
+              archiveCommandId: event.commandId,
               updatedAt: payload.updatedAt ?? archivedAt,
             }),
           };
@@ -624,6 +626,7 @@ export function projectEvent(
             ...nextBase,
             threads: updateThread(nextBase.threads, payload.threadId, {
               archivedAt: null,
+              archiveCommandId: null,
               updatedAt,
             }),
           };

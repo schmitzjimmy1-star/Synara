@@ -189,6 +189,7 @@ describe("orchestration projector", () => {
         createdAt: now,
         updatedAt: now,
         archivedAt: null,
+        archiveCommandId: null,
         settledAt: null,
         deletedAt: null,
         handoff: null,
@@ -199,6 +200,52 @@ describe("orchestration projector", () => {
         session: null,
       },
     ]);
+  });
+
+  it("projects and clears the command that caused the current archive state", async () => {
+    const createdAt = "2026-08-21T10:00:00.000Z";
+    const archivedAt = "2026-08-21T11:00:00.000Z";
+    const unarchivedAt = "2026-08-21T12:00:00.000Z";
+    const running = await projectThreadWithRunningTurn({
+      createdAt,
+      startedAt: "2026-08-21T10:30:00.000Z",
+    });
+
+    const archived = await Effect.runPromise(
+      projectEvent(
+        running,
+        makeEvent({
+          sequence: 3,
+          type: "thread.archived",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: archivedAt,
+          commandId: "cmd-archive-causal",
+          payload: { threadId: "thread-1", archivedAt, updatedAt: archivedAt },
+        }),
+      ),
+    );
+
+    expect(archived.threads[0]?.archiveCommandId).toBe("cmd-archive-causal");
+    expect(archived.threads[0]?.archivedAt).toBe(archivedAt);
+
+    const unarchived = await Effect.runPromise(
+      projectEvent(
+        archived,
+        makeEvent({
+          sequence: 4,
+          type: "thread.unarchived",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: unarchivedAt,
+          commandId: "cmd-unarchive-causal",
+          payload: { threadId: "thread-1", updatedAt: unarchivedAt },
+        }),
+      ),
+    );
+
+    expect(unarchived.threads[0]?.archiveCommandId).toBeNull();
+    expect(unarchived.threads[0]?.archivedAt).toBeNull();
   });
 
   it("updates thread settings from turn start events", async () => {

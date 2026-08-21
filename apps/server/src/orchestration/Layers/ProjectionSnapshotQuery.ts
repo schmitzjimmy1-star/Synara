@@ -689,6 +689,7 @@ function toProjectedThreadShellFromStoredSummary(input: {
     createdAt: threadRow.createdAt,
     updatedAt: threadRow.updatedAt,
     archivedAt: threadRow.archivedAt ?? null,
+    archiveCommandId: threadRow.archiveCommandId ?? null,
     settledAt: threadRow.settledAt ?? null,
     handoff: threadRow.handoff,
     goal: threadRow.goal ?? "",
@@ -742,6 +743,7 @@ function toProjectedThread(input: {
     createdAt: threadRow.createdAt,
     updatedAt: threadRow.updatedAt,
     archivedAt: threadRow.archivedAt ?? null,
+    archiveCommandId: threadRow.archiveCommandId ?? null,
     settledAt: threadRow.settledAt ?? null,
     deletedAt: threadRow.deletedAt,
     handoff: threadRow.handoff,
@@ -917,6 +919,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           archived_at AS "archivedAt",
+          archive_command_id AS "archiveCommandId",
           settled_at AS "settledAt",
           deleted_at AS "deletedAt"
         FROM projection_threads
@@ -969,6 +972,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           archived_at AS "archivedAt",
+          archive_command_id AS "archiveCommandId",
           settled_at AS "settledAt",
           deleted_at AS "deletedAt"
         FROM projection_threads
@@ -1550,6 +1554,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           archived_at AS "archivedAt",
+          archive_command_id AS "archiveCommandId",
           settled_at AS "settledAt",
           deleted_at AS "deletedAt"
         FROM projection_threads
@@ -1608,6 +1613,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           archived_at AS "archivedAt",
+          archive_command_id AS "archiveCommandId",
           settled_at AS "settledAt",
           deleted_at AS "deletedAt"
         FROM projection_threads

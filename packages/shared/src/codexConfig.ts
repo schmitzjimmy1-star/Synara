@@ -81,15 +81,6 @@ export function parseCodexConfigMcpServerCount(content: string): number {
   return isTomlTable(servers) ? Object.keys(servers).length : 0;
 }
 
-export function isOpenRouterCodexConfig(content: string): boolean {
-  const baseUrl = parseCodexConfigProviderBaseUrl(content, "openrouter")?.replace(/\/+$/, "");
-  return (
-    parseCodexConfigModelProvider(content) === "openrouter" &&
-    baseUrl === "https://openrouter.ai/api/v1" &&
-    isCodexResponsesProviderConfig(content)
-  );
-}
-
 export type CodexCustomProviderProfile = {
   readonly provider: string;
   readonly baseUrl: string;
@@ -165,10 +156,6 @@ export function parseCodexCustomProviderProfile(
   if (!credentialSource) return undefined;
 
   return { provider, baseUrl, wireApi, credentialSource };
-}
-
-export function isCodexResponsesProviderConfig(content: string): boolean {
-  return parseCodexCustomProviderProfile(content)?.wireApi === "responses";
 }
 
 /**
