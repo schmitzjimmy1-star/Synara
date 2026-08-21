@@ -4,7 +4,7 @@
 // Exports: app setting schema, normalization helpers, provider option builders
 
 import { useEffect, useRef } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Option, Schema, SchemaTransformation } from "effect";
 import {
   type AssistantDeliveryMode,
@@ -55,6 +55,11 @@ import {
 const APP_SETTINGS_STORAGE_KEY = "synara:app-settings:v1";
 const SERVER_SETTINGS_MIGRATION_STORAGE_KEY = "synara:server-settings-migrated:v1";
 const MAX_CUSTOM_MODEL_COUNT = 32;
+
+function invalidateCodexRouteQueries(queryClient: QueryClient): void {
+  void queryClient.invalidateQueries({ queryKey: serverQueryKeys.diagnostics() });
+  void queryClient.invalidateQueries({ queryKey: providerDiscoveryQueryKeys.all });
+}
 export const MAX_CUSTOM_MODEL_LENGTH = 256;
 export const MIN_CHAT_FONT_SIZE_PX = 11;
 export const MAX_CHAT_FONT_SIZE_PX = 18;
@@ -628,6 +633,9 @@ function hasOwn<Key extends keyof AppSettings>(patch: Partial<AppSettings>, key:
 
 function touchesProviderDiscoverySettings(patch: Partial<AppSettings>): boolean {
   return (
+    hasOwn(patch, "codexHomePath") ||
+    hasOwn(patch, "codexProfile") ||
+    hasOwn(patch, "customCodexModels") ||
     hasOwn(patch, "kiloBinaryPath") ||
     hasOwn(patch, "kiloServerPassword") ||
     hasOwn(patch, "kiloServerUrl") ||
@@ -1260,6 +1268,7 @@ export function useAppSettings() {
       .server.updateSettings(migrationPatch)
       .then((nextSettings) => {
         queryClient.setQueryData(serverQueryKeys.settings(), nextSettings);
+        invalidateCodexRouteQueries(queryClient);
         globalThis.localStorage?.setItem(SERVER_SETTINGS_MIGRATION_STORAGE_KEY, "1");
       })
       .catch(() => {
@@ -1296,6 +1305,7 @@ export function useAppSettings() {
       .server.updateSettings(serverPatch)
       .then((nextSettings) => {
         queryClient.setQueryData(serverQueryKeys.settings(), nextSettings);
+        invalidateCodexRouteQueries(queryClient);
       })
       .catch(() => {
         void queryClient.invalidateQueries({ queryKey: serverQueryKeys.settings() });
@@ -1310,6 +1320,7 @@ export function useAppSettings() {
       .server.updateSettings(serverPatch)
       .then((nextSettings) => {
         queryClient.setQueryData(serverQueryKeys.settings(), nextSettings);
+        invalidateCodexRouteQueries(queryClient);
       })
       .catch(() => {
         void queryClient.invalidateQueries({ queryKey: serverQueryKeys.settings() });

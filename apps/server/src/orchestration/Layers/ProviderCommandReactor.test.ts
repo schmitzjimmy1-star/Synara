@@ -7134,6 +7134,165 @@ describe("ProviderCommandReactor", () => {
     expect(harness.startSession.mock.calls[1]?.[1]).not.toHaveProperty("resumeCursor");
   });
 
+  it("bootstraps the full Side Chat transcript after a Codex route change", async () => {
+    const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), "synara-sidechat-route-"));
+    createdBaseDirs.add(codexHome);
+    fs.writeFileSync(path.join(codexHome, "route-a.config.toml"), 'model_provider = "a"\n');
+    fs.writeFileSync(path.join(codexHome, "route-b.config.toml"), 'model_provider = "b"\n');
+    const harness = await createHarness({
+      codexProviderSettings: { homePath: codexHome, profile: "route-a" },
+    });
+    const threadId = ThreadId.makeUnsafe("thread-codex-route-sidechat");
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.fork.create",
+        commandId: CommandId.makeUnsafe("cmd-codex-route-sidechat-create"),
+        threadId,
+        sourceThreadId: ThreadId.makeUnsafe("thread-1"),
+        sidechatSourceThreadId: ThreadId.makeUnsafe("thread-1"),
+        projectId: asProjectId("project-1"),
+        title: "Codex route Side Chat",
+        modelSelection: { provider: "codex", model: "gpt-5.6-sol" },
+        runtimeMode: "approval-required",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        envMode: "local",
+        branch: null,
+        worktreePath: null,
+        importedMessages: [
+          {
+            messageId: asMessageId("codex-route-sidechat-imported-user"),
+            role: "user",
+            text: "Context retained across the route change",
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+        createdAt: now,
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-codex-route-sidechat-first-turn"),
+        threadId,
+        message: {
+          messageId: asMessageId("codex-route-sidechat-first-user"),
+          role: "user",
+          text: "First Side Chat turn",
+          attachments: [],
+        },
+        runtimeMode: "approval-required",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        createdAt: now,
+      }),
+    );
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect((harness.sendTurn.mock.calls[0]?.[0] as { input?: string }).input).toContain(
+      "<sidechat_context>",
+    );
+    await harness.emitRuntimeEvent({
+      type: "turn.completed",
+      eventId: asEventId("evt-codex-route-sidechat-first-completed"),
+      provider: "codex",
+      threadId,
+      createdAt: new Date().toISOString(),
+      turnId: asTurnId("turn-1"),
+      payload: { state: "completed" },
+      providerRefs: {},
+    } as ProviderRuntimeEvent);
+    await Effect.runPromise(
+      harness.serverSettings.updateSettings({
+        providers: { codex: { profile: "route-b" } },
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-codex-route-sidechat-second-turn"),
+        threadId,
+        message: {
+          messageId: asMessageId("codex-route-sidechat-second-user"),
+          role: "user",
+          text: "Continue after changing routes",
+          attachments: [],
+        },
+        runtimeMode: "approval-required",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        createdAt: new Date().toISOString(),
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+    const restartedInput = harness.sendTurn.mock.calls[1]?.[0] as { input?: string };
+    expect(restartedInput.input).toContain("<thread_context>");
+    expect(restartedInput.input).not.toContain("<sidechat_context>");
+    expect(restartedInput.input).toContain("Context retained across the route change");
+    expect(restartedInput.input).toContain("First Side Chat turn");
+    expect(restartedInput.input).toContain("Continue after changing routes");
+  });
+
+  it("stops a Side Chat session when its source-owned workspace changes", async () => {
+    const harness = await createHarness();
+    const threadId = ThreadId.makeUnsafe("thread-moving-sidechat");
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.fork.create",
+        commandId: CommandId.makeUnsafe("cmd-moving-sidechat-create"),
+        threadId,
+        sourceThreadId: ThreadId.makeUnsafe("thread-1"),
+        sidechatSourceThreadId: ThreadId.makeUnsafe("thread-1"),
+        projectId: asProjectId("project-1"),
+        title: "Moving Side Chat",
+        modelSelection: { provider: "codex", model: "gpt-5.6-sol" },
+        runtimeMode: "approval-required",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        envMode: "local",
+        branch: null,
+        worktreePath: null,
+        importedMessages: [],
+        createdAt: now,
+      }),
+    );
+    harness.setRuntimeSessionTurnState({ threadId, status: "ready" });
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("cmd-moving-sidechat-session"),
+        threadId,
+        session: {
+          threadId,
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.makeUnsafe("cmd-move-sidechat-source"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        workingDirectory: "/tmp/moved-source",
+      }),
+    );
+
+    await waitFor(() =>
+      harness.stopSession.mock.calls.some(
+        ([input]) => (input as { threadId?: ThreadId }).threadId === threadId,
+      ),
+    );
+  });
+
   it("forwards codex model options through session start and turn send", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();
@@ -9852,27 +10011,22 @@ describe("ProviderCommandReactor", () => {
     });
   });
 
-  it.skip("does not restore pending sidechat context after an explicit session stop", async () => {
-    const threadId = ThreadId.makeUnsafe("thread-stopped-droid-sidechat");
-    const harness = await createHarness({
-      forkThreadResult: {
-        threadId,
-        resumeCursor: { sessionId: "stopped-droid-sidechat" },
-      },
-    });
+  it("does not restore pending Side Chat context after an explicit Codex session stop", async () => {
+    const threadId = ThreadId.makeUnsafe("thread-stopped-codex-sidechat");
+    const harness = await createHarness();
     const now = new Date().toISOString();
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.fork.create",
-        commandId: CommandId.makeUnsafe("cmd-stopped-droid-sidechat-create"),
+        commandId: CommandId.makeUnsafe("cmd-stopped-codex-sidechat-create"),
         threadId,
         sourceThreadId: ThreadId.makeUnsafe("thread-1"),
         sidechatSourceThreadId: ThreadId.makeUnsafe("thread-1"),
         projectId: asProjectId("project-1"),
-        title: "Stopped Droid sidechat",
+        title: "Stopped Codex Side Chat",
         modelSelection: {
-          provider: "droid",
-          model: "claude-sonnet-4-6",
+          provider: "codex",
+          model: "gpt-5.6-sol",
         },
         runtimeMode: "approval-required",
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -9895,7 +10049,7 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        commandId: CommandId.makeUnsafe("cmd-stopped-droid-sidechat-overlong"),
+        commandId: CommandId.makeUnsafe("cmd-stopped-codex-sidechat-overlong"),
         threadId,
         message: {
           messageId: asMessageId("stopped-droid-sidechat-overlong-user"),
@@ -9918,7 +10072,7 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.session.stop",
-        commandId: CommandId.makeUnsafe("cmd-stopped-droid-sidechat-stop"),
+        commandId: CommandId.makeUnsafe("cmd-stopped-codex-sidechat-stop"),
         threadId,
         createdAt: now,
       }),
@@ -9934,7 +10088,7 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        commandId: CommandId.makeUnsafe("cmd-stopped-droid-sidechat-fresh-turn"),
+        commandId: CommandId.makeUnsafe("cmd-stopped-codex-sidechat-fresh-turn"),
         threadId,
         message: {
           messageId: asMessageId("stopped-droid-sidechat-fresh-user"),

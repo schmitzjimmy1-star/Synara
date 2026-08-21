@@ -665,63 +665,18 @@ const make = Effect.gen(function* () {
   const queuedTurnPromotionOwner = `provider-queued-turn:${crypto.randomUUID()}`;
   const sidechatContextBootstrapThreadIds = new Set<string>();
   // Fresh sessions that cannot inherit native conversation state need one
-  // transcript bootstrap (fork fallbacks and non-resumable Droid model changes).
+  // transcript bootstrap (fork fallbacks and non-resumable Codex route changes).
   const freshSessionContextBootstrapThreadIds = new Set<string>();
   // Providers without native rewind restart after rollback and receive the
   // retained projection transcript once on their next prompt.
   const rollbackContextBootstrapThreadIds = new Set<string>();
-  type PendingContextBootstrapAttempt = {
-    turnId?: TurnId;
-    terminalEvent?: ProviderQueueDrainEvent;
-    readonly clearSidechat: boolean;
-    readonly clearPriorTranscript: boolean;
-  };
-  const pendingContextBootstrapAttempts = new Map<string, PendingContextBootstrapAttempt>();
   // Explicit stop resets context once: the next successful session start must
   // begin clean even if fork metadata would normally register a bootstrap.
   const suppressContextBootstrapOnNextStartThreadIds = new Set<string>();
-  const clearPendingContextBootstraps = (threadId: string) => {
+  const clearContextBootstraps = (threadId: string) => {
     sidechatContextBootstrapThreadIds.delete(threadId);
     freshSessionContextBootstrapThreadIds.delete(threadId);
     rollbackContextBootstrapThreadIds.delete(threadId);
-    pendingContextBootstrapAttempts.delete(threadId);
-  };
-
-  const completePendingContextBootstrapAttempt = (
-    threadId: string,
-    attempt: PendingContextBootstrapAttempt,
-    event: ProviderQueueDrainEvent,
-  ) => {
-    // Keep bootstrap flags after cancellation or failure even though Droid may
-    // already have received the prompt. A bounded duplicate on retry is safer
-    // than dropping the only model-visible copy of the retained transcript.
-    if (event.type !== "turn.completed" || event.payload.state !== "completed") {
-      return;
-    }
-    if (attempt.clearSidechat) {
-      sidechatContextBootstrapThreadIds.delete(threadId);
-    }
-    if (attempt.clearPriorTranscript) {
-      freshSessionContextBootstrapThreadIds.delete(threadId);
-      rollbackContextBootstrapThreadIds.delete(threadId);
-      sidechatContextBootstrapThreadIds.delete(threadId);
-    }
-  };
-
-  const observePendingContextBootstrapTerminalEvent = (event: ProviderQueueDrainEvent) => {
-    const attempt = pendingContextBootstrapAttempts.get(event.threadId);
-    if (!attempt) {
-      return;
-    }
-    if (attempt.turnId === undefined) {
-      attempt.terminalEvent = event;
-      return;
-    }
-    if (attempt.turnId !== event.turnId) {
-      return;
-    }
-    pendingContextBootstrapAttempts.delete(event.threadId);
-    completePendingContextBootstrapAttempt(event.threadId, attempt, event);
   };
 
   const resolveConfiguredTextGenerationInput = Effect.fnUntraced(function* () {
@@ -971,7 +926,7 @@ const make = Effect.gen(function* () {
       // deleting it here would let a concurrent second drain start for the same
       // thread while the first is still running.
       suppressContextBootstrapOnNextStartThreadIds.delete(threadId);
-      clearPendingContextBootstraps(threadId);
+      clearContextBootstraps(threadId);
     });
 
   const clearStaleProviderResumeState = Effect.fnUntraced(function* (input: {
@@ -1331,7 +1286,7 @@ const make = Effect.gen(function* () {
         shouldRestartForModelSelectionChange,
         hasResumeCursor: resumeCursor !== undefined,
       });
-      if (routeChanged && shouldRegisterContextBootstrap && !thread.sidechatSourceThreadId) {
+      if (routeChanged && shouldRegisterContextBootstrap) {
         freshSessionContextBootstrapThreadIds.add(threadId);
       }
       const restartedSession = yield* startProviderSession(resumeCursor);
@@ -1805,7 +1760,6 @@ const make = Effect.gen(function* () {
     const cancelPendingStudioBaseline = studioOutputReactor.cancelPendingTurnBaseline(
       input.threadId,
     );
-    let pendingContextBootstrapAttempt: PendingContextBootstrapAttempt | undefined;
     let startedTurn: ProviderTurnStartResult | undefined;
 
     if (input.reviewTarget !== undefined) {
@@ -1823,17 +1777,6 @@ const make = Effect.gen(function* () {
       });
     } else {
       yield* capturePreTurnBaselines;
-      pendingContextBootstrapAttempt =
-        activeSession?.provider === "droid" &&
-        (sidechatBootstrapText !== null || priorTranscriptBootstrapText !== null)
-          ? {
-              clearSidechat: sidechatBootstrapText !== null,
-              clearPriorTranscript: priorTranscriptBootstrapText !== null,
-            }
-          : undefined;
-      if (pendingContextBootstrapAttempt) {
-        pendingContextBootstrapAttempts.set(input.threadId, pendingContextBootstrapAttempt);
-      }
       const ensureSessionForStaleRetry = ensureSessionForThread(input.threadId, input.createdAt, {
         ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
         ...(input.providerOptions !== undefined ? { providerOptions: input.providerOptions } : {}),
@@ -1931,34 +1874,9 @@ const make = Effect.gen(function* () {
             );
           }),
         ),
-        Effect.onError(() =>
-          Effect.gen(function* () {
-            yield* Effect.sync(() => {
-              if (
-                pendingContextBootstrapAttempt &&
-                pendingContextBootstrapAttempts.get(input.threadId) ===
-                  pendingContextBootstrapAttempt
-              ) {
-                pendingContextBootstrapAttempts.delete(input.threadId);
-              }
-            });
-            yield* cancelPendingStudioBaseline;
-          }),
-        ),
+        Effect.onError(() => cancelPendingStudioBaseline),
       );
       startedTurn = sentTurn;
-      if (pendingContextBootstrapAttempt) {
-        pendingContextBootstrapAttempt.turnId = sentTurn.turnId;
-        const terminalEvent = pendingContextBootstrapAttempt.terminalEvent;
-        if (terminalEvent?.turnId === sentTurn.turnId) {
-          pendingContextBootstrapAttempts.delete(input.threadId);
-          completePendingContextBootstrapAttempt(
-            input.threadId,
-            pendingContextBootstrapAttempt,
-            terminalEvent,
-          );
-        }
-      }
     }
     if (handoffBootstrapText && thread.handoff !== null && input.reviewTarget === undefined) {
       yield* orchestrationEngine.dispatch({
@@ -1974,7 +1892,6 @@ const make = Effect.gen(function* () {
     if (
       shouldBootstrapSidechatContext &&
       input.reviewTarget === undefined &&
-      pendingContextBootstrapAttempt === undefined &&
       (sidechatBootstrapText !== null || !hasSidechatBootstrapContent)
     ) {
       sidechatContextBootstrapThreadIds.delete(input.threadId);
@@ -1982,7 +1899,6 @@ const make = Effect.gen(function* () {
     if (
       shouldBootstrapPriorTranscriptContext &&
       input.reviewTarget === undefined &&
-      pendingContextBootstrapAttempt === undefined &&
       (priorTranscriptBootstrapText !== null || !hasPriorTranscriptBootstrapContent)
     ) {
       freshSessionContextBootstrapThreadIds.delete(input.threadId);
@@ -2890,7 +2806,6 @@ const make = Effect.gen(function* () {
     );
 
   const processQueueDrainEvent = Effect.fnUntraced(function* (event: ProviderQueueDrainEvent) {
-    observePendingContextBootstrapTerminalEvent(event);
     const sessionThreadId =
       (yield* resolveProviderSessionThread(event.threadId))?.id ?? event.threadId;
     const reservation = pendingQueuedDispatchBySessionThread.get(sessionThreadId);
@@ -3595,7 +3510,7 @@ const make = Effect.gen(function* () {
         pendingQueuedDispatchBySessionThread.delete(sessionThreadId);
       }
     }
-    clearPendingContextBootstraps(thread.id);
+    clearContextBootstraps(thread.id);
     suppressContextBootstrapOnNextStartThreadIds.add(thread.id);
 
     const providerThreadId =
@@ -3810,6 +3725,25 @@ const make = Effect.gen(function* () {
           return;
         case "thread.meta-updated": {
           const thread = yield* resolveThread(event.payload.threadId);
+          const updatesSidechatWorkspace =
+            Boolean(thread?.sidechatSourceThreadId) &&
+            (Object.hasOwn(event.payload, "envMode") ||
+              Object.hasOwn(event.payload, "branch") ||
+              Object.hasOwn(event.payload, "worktreePath") ||
+              Object.hasOwn(event.payload, "workingDirectory") ||
+              Object.hasOwn(event.payload, "associatedWorktreePath") ||
+              Object.hasOwn(event.payload, "associatedWorktreeBranch") ||
+              Object.hasOwn(event.payload, "associatedWorktreeRef") ||
+              Object.hasOwn(event.payload, "createBranchFlowCompleted"));
+          if (updatesSidechatWorkspace && thread?.session && thread.session.status !== "stopped") {
+            // Source-owned workspace metadata can move a Side Chat to a new cwd.
+            // Its existing Codex process was spawned with the old cwd, so retire
+            // it before the next turn rather than silently reusing the stale route.
+            yield* processThreadSessionStop({
+              threadId: event.payload.threadId,
+              createdAt: event.payload.updatedAt,
+            });
+          }
           const startsOrResumesGoal =
             event.payload.goalPausedAt == null && event.payload.goalStartedAt != null;
           if (event.payload.goalStartBehavior !== "defer" && startsOrResumesGoal) {

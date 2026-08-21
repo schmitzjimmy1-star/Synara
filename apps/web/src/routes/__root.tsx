@@ -2156,6 +2156,8 @@ function EventRouter() {
     );
     const unsubServerSettingsUpdated = onServerSettingsUpdated((payload) => {
       queryClient.setQueryData(serverQueryKeys.settings(), payload.settings);
+      void queryClient.invalidateQueries({ queryKey: serverQueryKeys.diagnostics() });
+      void queryClient.invalidateQueries({ queryKey: providerDiscoveryQueryKeys.all });
       void queryClient.invalidateQueries({
         queryKey: serverSettingsQueryOptions().queryKey,
       });

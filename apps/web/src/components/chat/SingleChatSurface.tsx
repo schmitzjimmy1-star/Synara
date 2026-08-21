@@ -64,7 +64,7 @@ import { readNativeApi } from "../../nativeApi";
 import { selectRightDockState, useRightDockStore } from "../../rightDockStore";
 import {
   resolveActivePane,
-  findMissingSidechatPaneIds,
+  findInvalidSidechatPaneIds,
   type RightDockPane,
   type RightDockPaneKind,
 } from "../../rightDockStore.logic";
@@ -678,20 +678,43 @@ export function SingleChatSurface(props: {
     if (!threadsHydrated) {
       return;
     }
-    const existingThreadIds = new Set(threadSummaries.map((thread) => thread.id));
+    const sidechatSourceThreadIdByThreadId = new Map(
+      threadSummaries.map((thread) => [thread.id, thread.sidechatSourceThreadId ?? null]),
+    );
     for (const pane of dockState.panes) {
-      if (pane.kind === "sidechat" && pane.threadId && existingThreadIds.has(pane.threadId)) {
+      if (
+        pane.kind === "sidechat" &&
+        pane.threadId &&
+        sidechatSourceThreadIdByThreadId.get(pane.threadId) === props.threadId
+      ) {
         clearSidechatPaneRetention(pane.threadId);
       }
     }
-    const missingPaneIds = findMissingSidechatPaneIds(dockState, existingThreadIds);
-    if (missingPaneIds.length === 0) {
+    const invalidPaneIds = findInvalidSidechatPaneIds(
+      dockState,
+      props.threadId,
+      sidechatSourceThreadIdByThreadId,
+    );
+    if (invalidPaneIds.length === 0) {
       return;
     }
 
     const timerIds: number[] = [];
-    for (const paneId of missingPaneIds) {
+    for (const paneId of invalidPaneIds) {
       const pane = dockState.panes.find((candidate) => candidate.id === paneId);
+      const paneSourceThreadId = pane?.threadId
+        ? sidechatSourceThreadIdByThreadId.get(pane.threadId)
+        : undefined;
+      // A hydrated thread owned by another host is definitively invalid. The
+      // retention grace is only for a newly created thread that has not reached
+      // the sidebar snapshot yet.
+      if (paneSourceThreadId !== undefined && paneSourceThreadId !== props.threadId) {
+        if (pane?.threadId) {
+          clearSidechatPaneRetention(pane.threadId);
+        }
+        closePane(props.threadId, paneId);
+        continue;
+      }
       const remainingGraceMs = pane?.threadId ? sidechatPaneRetentionRemainingMs(pane.threadId) : 0;
       if (remainingGraceMs === null) {
         continue;
@@ -960,12 +983,16 @@ export function SingleChatSurface(props: {
             />
           </Suspense>
         );
-      case "sidechat":
+      case "sidechat": {
         if (!pane.threadId) {
           return <RightDockPanePlaceholder kind="sidechat" />;
         }
-        if (!threadSummaries.some((thread) => thread.id === pane.threadId)) {
+        const sidechatSummary = threadSummaries.find((thread) => thread.id === pane.threadId);
+        if (!sidechatSummary) {
           return <PanelStateMessage>Loading side chat...</PanelStateMessage>;
+        }
+        if (sidechatSummary.sidechatSourceThreadId !== props.threadId) {
+          return null;
         }
         if (context.runtimeMode === "preview") {
           return null;
@@ -985,6 +1012,7 @@ export function SingleChatSurface(props: {
             onCloseThreadPane={() => closePane(props.threadId, pane.id)}
           />
         );
+      }
       default:
         return <RightDockPanePlaceholder kind={pane.kind} />;
     }

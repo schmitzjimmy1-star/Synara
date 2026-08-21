@@ -5,15 +5,13 @@
 // Depends on: Codex home path helpers, shared Codex config parsing, login-shell env reader.
 
 import * as fs from "node:fs/promises";
-import { readFileSync } from "node:fs";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { parse as parseToml, stringify as stringifyToml, type TomlTable } from "smol-toml";
 
 import {
-  parseCodexConfigModelProvider,
+  layerCodexConfig,
   readActiveCodexProviderEnvKey,
-  readCodexConfigContent,
+  resolveEffectiveCodexRoute,
 } from "@synara/shared/codexConfig";
 import {
   readEnvironmentFromLoginShell,
@@ -32,28 +30,8 @@ const CODEX_OVERLAY_SHARED_STATE_FILES = new Set(["auth.json"]);
 const SYNARA_MANAGED_MCP_TABLE_HEADER = "[mcp_servers.synara]";
 const codexOverlayPreparationQueues = new Map<string, Promise<void>>();
 
-function isTomlTable(value: unknown): value is TomlTable {
-  return (
-    typeof value === "object" && value !== null && !Array.isArray(value) && !(value instanceof Date)
-  );
-}
-
-function mergeTomlTables(base: TomlTable, overlay: TomlTable): TomlTable {
-  const merged: TomlTable = { ...base };
-  for (const [key, overlayValue] of Object.entries(overlay)) {
-    const baseValue = merged[key];
-    merged[key] =
-      isTomlTable(baseValue) && isTomlTable(overlayValue)
-        ? mergeTomlTables(baseValue, overlayValue)
-        : overlayValue;
-  }
-  return merged;
-}
-
 export function applyCodexProfileLayer(baseConfig: string, profileConfig: string): string {
-  const base = baseConfig.trim() ? parseToml(baseConfig) : {};
-  const profile = profileConfig.trim() ? parseToml(profileConfig) : {};
-  return stringifyToml(mergeTomlTables(base, profile)).trimEnd();
+  return layerCodexConfig(baseConfig, profileConfig);
 }
 
 export interface CodexRouteIdentity {
@@ -71,32 +49,12 @@ export function resolveCodexRouteIdentity(input: {
   readonly homePath?: string;
   readonly profile?: string;
 }): CodexRouteIdentity {
-  const env = input.env ?? process.env;
-  const sourceHomePath = path.resolve(resolveBaseCodexHomePath(env, input.homePath));
-  const profile = input.profile?.trim() || null;
-  const readConfigOrEmpty = (filePath: string): string => {
-    try {
-      return readFileSync(filePath, "utf8");
-    } catch (cause) {
-      if ((cause as NodeJS.ErrnoException).code === "ENOENT") return "";
-      throw cause;
-    }
+  const route = resolveEffectiveCodexRoute(input);
+  return {
+    fingerprint: route.fingerprint,
+    sourceHomePath: route.sourceHomePath,
+    profile: route.profile,
   };
-  const sourceConfig = readConfigOrEmpty(path.join(sourceHomePath, "config.toml"));
-  const profileConfig = profile
-    ? readConfigOrEmpty(path.join(sourceHomePath, `${profile}.config.toml`))
-    : "";
-  const fingerprint = createHash("sha256")
-    .update("synara-codex-route-v1\0")
-    .update(sourceHomePath)
-    .update("\0")
-    .update(profile ?? "")
-    .update("\0")
-    .update(sourceConfig)
-    .update("\0")
-    .update(profileConfig)
-    .digest("hex");
-  return { fingerprint, sourceHomePath, profile };
 }
 
 interface CodexOverlayEntryLinker {
@@ -687,10 +645,6 @@ export async function buildCodexProcessEnv(
         ? { ...baseEnv, CODEX_HOME: overlayHomePath ?? input.homePath }
         : baseEnv;
   const platform = input.platform ?? process.platform;
-  const configContent = readCodexConfigContent(configuredEnv);
-  const activeModelProvider = configContent
-    ? parseCodexConfigModelProvider(configContent)
-    : undefined;
   const providerEnvKey = readActiveCodexProviderEnvKey(configuredEnv);
   if (providerEnvKey) {
     registerProviderCredentialKey(providerEnvKey);
@@ -698,9 +652,7 @@ export async function buildCodexProcessEnv(
   const effectiveEnv = buildProviderChildEnvironment({
     provider: "codex",
     baseEnv: configuredEnv,
-    ...(activeModelProvider && activeModelProvider !== "openai"
-      ? { credentialKeys: providerEnvKey ? [providerEnvKey] : [] }
-      : {}),
+    ...(providerEnvKey ? { credentialKeys: [providerEnvKey] } : {}),
   });
 
   if (platform === "darwin" || platform === "linux") {

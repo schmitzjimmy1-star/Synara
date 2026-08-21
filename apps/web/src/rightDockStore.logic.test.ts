@@ -7,7 +7,7 @@ import {
   closePaneInState,
   closeThreadPaneReferencesInState,
   createDefaultRightDockState,
-  findMissingSidechatPaneIds,
+  findInvalidSidechatPaneIds,
   isRightDockPaneKind,
   openPaneInState,
   resolveVisibleDockSidechatThreadIds,
@@ -206,16 +206,26 @@ describe("sidechat pane", () => {
     expect(switched.panes[0]?.threadId).toBe("thread-b");
   });
 
-  it("finds sidechat panes whose backing thread no longer exists", () => {
+  it("finds sidechat panes whose backing thread is missing or belongs to another host", () => {
+    const hostThreadId = ThreadId.makeUnsafe("host-thread");
+    const otherHostThreadId = ThreadId.makeUnsafe("other-host-thread");
+    const sidechatThreadId = ThreadId.makeUnsafe("missing-thread");
     const state = openPaneInState(createDefaultRightDockState(), {
       paneId: "side-pane",
       kind: "sidechat",
-      threadId: ThreadId.makeUnsafe("missing-thread"),
+      threadId: sidechatThreadId,
     });
 
-    expect(findMissingSidechatPaneIds(state, new Set())).toEqual(["side-pane"]);
+    expect(findInvalidSidechatPaneIds(state, hostThreadId, new Map())).toEqual(["side-pane"]);
     expect(
-      findMissingSidechatPaneIds(state, new Set([ThreadId.makeUnsafe("missing-thread")])),
+      findInvalidSidechatPaneIds(
+        state,
+        hostThreadId,
+        new Map([[sidechatThreadId, otherHostThreadId]]),
+      ),
+    ).toEqual(["side-pane"]);
+    expect(
+      findInvalidSidechatPaneIds(state, hostThreadId, new Map([[sidechatThreadId, hostThreadId]])),
     ).toEqual([]);
   });
 

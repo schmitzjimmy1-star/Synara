@@ -11,15 +11,6 @@ const CodexProfileSetting = TrimmedString.check(
 const CustomModels = Schema.Array(Schema.String.check(Schema.isMaxLength(256))).pipe(
   Schema.withDecodingDefault(() => []),
 );
-export const OPENROUTER_CODEX_MODELS = [
-  "openai/gpt-5.6-sol",
-  "anthropic/claude-sonnet-5",
-  "deepseek/deepseek-v4-pro",
-  "deepseek/deepseek-v4-flash-0731",
-  "qwen/qwen3.8-max",
-] as const;
-export const OPENROUTER_CODEX_DEFAULT_MODEL = OPENROUTER_CODEX_MODELS[0];
-
 const ProviderSettingsBase = {
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
   binaryPath: StringSetting.pipe(Schema.withDecodingDefault(() => "")),

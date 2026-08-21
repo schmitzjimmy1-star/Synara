@@ -389,12 +389,15 @@ export function resolveActivePane(state: RightDockThreadState): RightDockPane | 
   return state.panes.find((pane) => pane.id === state.activePaneId) ?? null;
 }
 
-export function findMissingSidechatPaneIds(
+export function findInvalidSidechatPaneIds(
   state: RightDockThreadState,
-  existingThreadIds: ReadonlySet<ThreadId>,
+  hostThreadId: ThreadId,
+  sidechatSourceThreadIdByThreadId: ReadonlyMap<ThreadId, ThreadId | null>,
 ): readonly string[] {
   return state.panes.flatMap((pane) =>
-    pane.kind === "sidechat" && pane.threadId && !existingThreadIds.has(pane.threadId)
+    pane.kind === "sidechat" &&
+    pane.threadId &&
+    sidechatSourceThreadIdByThreadId.get(pane.threadId) !== hostThreadId
       ? [pane.id]
       : [],
   );

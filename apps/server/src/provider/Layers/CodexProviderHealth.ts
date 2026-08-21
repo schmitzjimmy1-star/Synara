@@ -3,6 +3,10 @@ import { promisify } from "node:util";
 
 import { ServerProviderUpdateError, type ServerProviderStatus } from "@synara/contracts";
 import { resolveCodexBinary } from "@synara/shared/codexBinary";
+import {
+  resolveEffectiveCodexProviderEnvKey,
+  resolveEffectiveCodexRoute,
+} from "@synara/shared/codexConfig";
 import { Effect, Layer, PubSub, Ref, Stream } from "effect";
 
 import { buildCodexProcessEnv } from "../../codexProcessEnv.ts";
@@ -23,12 +27,49 @@ export const probeCodexProviderHealth = Effect.fn("CodexProviderHealth.probe")(f
   const homePath = settings.providers.codex.homePath.trim();
   const profile = settings.providers.codex.profile.trim();
   const checkedAt = new Date().toISOString();
+  const route = yield* Effect.try({
+    try: () =>
+      resolveEffectiveCodexRoute({
+        ...(homePath ? { homePath } : {}),
+        ...(profile ? { profile } : {}),
+      }),
+    catch: (cause) => cause,
+  });
+  if (route.status === "invalid") {
+    return {
+      provider: "codex",
+      status: "error",
+      available: false,
+      authStatus: "unknown",
+      checkedAt,
+      autoRuntimeModeBinaryPath: configuredBinaryPath,
+      message: `Codex route is invalid: ${route.detail ?? "the selected profile cannot be used"}`,
+    } satisfies ServerProviderStatus;
+  }
   const env = yield* Effect.promise(() =>
     buildCodexProcessEnv({
       ...(homePath ? { homePath } : {}),
-      prepareOverlay: false,
+      ...(profile ? { profile } : {}),
     }),
   );
+  const credentialEnvKey =
+    route.credentialSource === "env"
+      ? resolveEffectiveCodexProviderEnvKey({
+          ...(homePath ? { homePath } : {}),
+          ...(profile ? { profile } : {}),
+        })
+      : undefined;
+  if (credentialEnvKey && !env[credentialEnvKey]?.trim()) {
+    return {
+      provider: "codex",
+      status: "warning",
+      available: false,
+      authStatus: "unauthenticated",
+      checkedAt,
+      autoRuntimeModeBinaryPath: configuredBinaryPath,
+      message: `Codex route credential '${credentialEnvKey}' is not available.`,
+    } satisfies ServerProviderStatus;
+  }
 
   return yield* Effect.tryPromise({
     try: async () => {
