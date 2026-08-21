@@ -32,13 +32,13 @@ async function disposeTerminalRuntime(threadId: string, terminalId: string): Pro
 // ask the server to close it (deleting history) with a best-effort `exit` write
 // fallback for transports that lack a structured close. `clearHistoryBeforeClose`
 // mirrors the chat surface's behavior when closing the final terminal of a thread.
-export function disposeAndCloseTerminalSession(input: {
+export async function disposeAndCloseTerminalSession(input: {
   api: NativeApi | undefined;
   threadId: string;
   terminalId: string;
   clearHistoryBeforeClose?: boolean;
   processAlreadyExited?: boolean;
-}): void {
+}): Promise<void> {
   const { api, threadId, terminalId } = input;
 
   const fallbackExitWrite = () => {
@@ -48,23 +48,44 @@ export function disposeAndCloseTerminalSession(input: {
     return api?.terminal.write({ threadId, terminalId, data: "exit\n" }).catch(() => undefined);
   };
 
-  // Local disposal stays ordered before the server close, as it was when the
-  // registry was imported statically.
-  void (async () => {
-    await disposeTerminalRuntime(threadId, terminalId);
+  // Local disposal stays ordered before the server close. Callers that remove
+  // tabs or panes await this promise so UI state can never outrun PTY teardown.
+  await disposeTerminalRuntime(threadId, terminalId);
 
-    if (api && "close" in api.terminal && typeof api.terminal.close === "function") {
-      try {
-        if (input.clearHistoryBeforeClose) {
-          await api.terminal.clear({ threadId, terminalId }).catch(() => undefined);
-        }
-        await api.terminal.close({ threadId, terminalId, deleteHistory: true });
-      } catch {
-        await fallbackExitWrite();
+  if (api && "close" in api.terminal && typeof api.terminal.close === "function") {
+    try {
+      if (input.clearHistoryBeforeClose) {
+        await api.terminal.clear({ threadId, terminalId }).catch(() => undefined);
       }
-      return;
+      await api.terminal.close({ threadId, terminalId, deleteHistory: true });
+    } catch {
+      await fallbackExitWrite();
     }
+    return;
+  }
 
-    await fallbackExitWrite();
-  })();
+  await fallbackExitWrite();
+}
+
+/** Close every PTY in a synthetic or host terminal scope, then drop all xterm runtimes. */
+export async function disposeAndCloseTerminalThreadSessions(input: {
+  api: NativeApi | undefined;
+  threadId: string;
+  deleteHistory?: boolean;
+}): Promise<void> {
+  await disposeTerminalRuntimeThread(input.threadId);
+  if (!input.api) return;
+  await input.api.terminal.close({
+    threadId: input.threadId,
+    deleteHistory: input.deleteHistory ?? true,
+  });
+}
+
+async function disposeTerminalRuntimeThread(threadId: string): Promise<void> {
+  try {
+    const { terminalRuntimeRegistry } = await import("./terminalRuntimeRegistry");
+    terminalRuntimeRegistry.disposeThread(threadId);
+  } catch (error) {
+    console.error("Failed to dispose terminal thread runtime", { threadId, error });
+  }
 }

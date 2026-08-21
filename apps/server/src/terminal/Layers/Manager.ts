@@ -39,10 +39,6 @@ import {
   repairPrivateFile,
 } from "../../privatePathPermissions";
 import {
-  applyManagedTerminalAgentWrapperEnv,
-  prepareManagedTerminalAgentWrappers,
-} from "../managedTerminalWrappers";
-import {
   ShellCandidate,
   TerminalError,
   TerminalManager,
@@ -154,8 +150,11 @@ const TERMINAL_ENV_BLOCKLIST = new Set([
 // carries no TERM of its own, so we pin it explicitly).
 const TERMINAL_SPAWN_TERM =
   globalThis.process.platform === "win32" ? "xterm-color" : "xterm-256color";
-const MANAGED_TERMINAL_WRAPPER_DIRNAME = "_managed-bin";
-const MANAGED_TERMINAL_ZSH_DIRNAME = "_managed-zsh";
+const DOCK_TERMINAL_SCOPE_PREFIX = "dock-terminal:";
+
+function dockTerminalScopeId(threadId: string): string {
+  return `${DOCK_TERMINAL_SCOPE_PREFIX}${threadId}`;
+}
 
 const decodeTerminalOpenInput = Schema.decodeUnknownSync(TerminalOpenInput);
 const decodeTerminalRestartInput = Schema.decodeUnknownSync(TerminalRestartInput);
@@ -310,6 +309,7 @@ function resolveShellCandidates(
 }
 
 export const __terminalManagerShellTesting = {
+  createTerminalSpawnEnv,
   resolveShellCandidates,
   windowsDefaultTerminalShell: WINDOWS_DEFAULT_TERMINAL_SHELL,
 };
@@ -659,10 +659,6 @@ function shouldExcludeTerminalEnvKey(key: string): boolean {
 function createTerminalSpawnEnv(
   baseEnv: NodeJS.ProcessEnv,
   runtimeEnv?: Record<string, string> | null,
-  managedWrapperOptions?: {
-    binDir: string | null;
-    zshDir: string | null;
-  },
 ): NodeJS.ProcessEnv {
   const spawnEnv: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(baseEnv)) {
@@ -680,9 +676,7 @@ function createTerminalSpawnEnv(
       spawnEnv[key] = value;
     }
   }
-  return managedWrapperOptions
-    ? applyManagedTerminalAgentWrapperEnv(spawnEnv, managedWrapperOptions)
-    : spawnEnv;
+  return spawnEnv;
 }
 
 function normalizedRuntimeEnv(
@@ -764,8 +758,6 @@ interface KillEscalationHandle {
 export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> {
   private readonly sessions = new Map<string, TerminalSessionState>();
   private readonly logsDir: string;
-  private managedWrapperBinDir: string | null;
-  private managedWrapperZshDir: string | null;
   private readonly historyLineLimit: number;
   private readonly historyByteLimit: number;
   private readonly ptyAdapter: PtyAdapterShape;
@@ -799,12 +791,6 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
   constructor(options: TerminalManagerOptions) {
     super();
     this.logsDir = options.logsDir ?? path.resolve(process.cwd(), ".logs", "terminals");
-    this.managedWrapperBinDir =
-      process.platform === "win32"
-        ? null
-        : path.join(this.logsDir, MANAGED_TERMINAL_WRAPPER_DIRNAME);
-    this.managedWrapperZshDir =
-      process.platform === "win32" ? null : path.join(this.logsDir, MANAGED_TERMINAL_ZSH_DIRNAME);
     this.historyLineLimit = options.historyLineLimit ?? DEFAULT_HISTORY_LINE_LIMIT;
     this.historyByteLimit = options.historyByteLimit ?? DEFAULT_HISTORY_BYTE_LIMIT;
     this.ptyAdapter = options.ptyAdapter;
@@ -826,26 +812,6 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     this.maxRetainedInactiveSessions =
       options.maxRetainedInactiveSessions ?? DEFAULT_MAX_RETAINED_INACTIVE_SESSIONS;
     ensurePrivateDirectorySync(this.logsDir);
-    if (this.managedWrapperBinDir) {
-      try {
-        const preparedWrappers = prepareManagedTerminalAgentWrappers({
-          baseEnv: process.env,
-          targetDir: this.managedWrapperBinDir,
-          zshDir:
-            this.managedWrapperZshDir ?? path.join(this.logsDir, MANAGED_TERMINAL_ZSH_DIRNAME),
-        });
-        this.managedWrapperBinDir = preparedWrappers.binDir;
-        this.managedWrapperZshDir = preparedWrappers.zshDir;
-      } catch (error) {
-        this.logger.warn("failed to prepare managed terminal wrappers", {
-          binDir: this.managedWrapperBinDir,
-          zshDir: this.managedWrapperZshDir,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        this.managedWrapperBinDir = null;
-        this.managedWrapperZshDir = null;
-      }
-    }
   }
 
   private historyLimits(): HistoryLimits {
@@ -1154,6 +1120,12 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
 
       await this.closeThreadSessions(input.threadId, input.deleteHistory === true);
     });
+    if (!input.terminalId && !input.threadId.startsWith(DOCK_TERMINAL_SCOPE_PREFIX)) {
+      const dockScopeId = dockTerminalScopeId(input.threadId);
+      await this.runWithThreadLock(dockScopeId, () =>
+        this.closeThreadSessions(dockScopeId, input.deleteHistory === true),
+      );
+    }
   }
 
   async closeSessionsOpenedAtOrBefore(input: TerminalCloseOpenedAtOrBeforeInput): Promise<void> {
@@ -1168,6 +1140,16 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
         (session) => Date.parse(session.lastOpenedAt) <= cutoff,
       ),
     );
+    if (!input.threadId.startsWith(DOCK_TERMINAL_SCOPE_PREFIX)) {
+      const dockScopeId = dockTerminalScopeId(input.threadId);
+      await this.runWithThreadLock(dockScopeId, () =>
+        this.closeThreadSessions(
+          dockScopeId,
+          false,
+          (session) => Date.parse(session.lastOpenedAt) <= cutoff,
+        ),
+      );
+    }
   }
 
   private async closeThreadSessions(
@@ -1200,6 +1182,15 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
   }
 
   async disposeForShutdown(): Promise<void> {
+    const sessions = [...this.sessions.values()];
+    for (const session of sessions) {
+      // Materialize the final PTY batch before draining the debounced history
+      // writers. App shutdown is the last chance to preserve these bytes.
+      this.flushOutputBuffer(session);
+    }
+    await Promise.all(
+      sessions.map((session) => this.flushPersistQueue(session.threadId, session.terminalId)),
+    );
     const pendingEscalations = this.disposeInternal({ keepEscalationTimers: true });
     if (pendingEscalations > 0) {
       await new Promise((resolve) =>
@@ -1271,10 +1262,10 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     let startedShell: string | null = null;
     try {
       const shellCandidates = resolveShellCandidates(this.shellResolver);
-      const terminalEnv = createTerminalSpawnEnv(process.env, session.runtimeEnv, {
-        binDir: this.managedWrapperBinDir,
-        zshDir: this.managedWrapperZshDir,
-      });
+      // Embedded terminals inherit the user's canonical CLI environment. Synara
+      // deliberately does not shadow codex/claude, inject hooks, or substitute a
+      // private CODEX_HOME; ordinary process inspection still supplies activity.
+      const terminalEnv = createTerminalSpawnEnv(process.env, session.runtimeEnv);
       let lastSpawnError: unknown = null;
 
       const spawnWithCandidate = (candidate: ShellCandidate) =>

@@ -23,7 +23,6 @@ import {
   workspaceRootsEqual,
 } from "@synara/shared/threadWorkspace";
 import { doThreadMarkerRangesOverlap } from "@synara/shared/threadMarkers";
-import { collectSubagentDescendants } from "@synara/shared/threadHierarchy";
 import { autoRuntimeModeSelectionIssue } from "@synara/shared/runtimeMode";
 import { providerSupportsNativeTurnSteering } from "@synara/shared/providerMetadata";
 import {
@@ -323,6 +322,61 @@ function resolveCreatedThreadWorkspaceMetadata(
         : {}),
     }),
   };
+}
+
+function resolveForkedThreadWorkspaceMetadata(
+  projectKind: ProjectKind | undefined,
+  command: Extract<OrchestrationCommand, { type: "thread.fork.create" }>,
+  sourceThread: OrchestrationThread,
+) {
+  if ((command.sidechatSourceThreadId ?? null) === null) {
+    return resolveCreatedThreadWorkspaceMetadata(projectKind, command);
+  }
+
+  // A Side Chat is another view into the source thread's workspace, not an
+  // independently routable fork. Derive this server-side so stale or hostile
+  // clients cannot move it onto a different branch, worktree, or folder.
+  return {
+    envMode: sourceThread.envMode,
+    branch: sourceThread.branch,
+    worktreePath: sourceThread.worktreePath,
+    workingDirectory: sourceThread.workingDirectory ?? null,
+    associatedWorktreePath: sourceThread.associatedWorktreePath ?? null,
+    associatedWorktreeBranch: sourceThread.associatedWorktreeBranch ?? null,
+    associatedWorktreeRef: sourceThread.associatedWorktreeRef ?? null,
+  };
+}
+
+/**
+ * Side Chats and subagents are both lifecycle-owned by the thread that exposes
+ * them. Traverse both links together so a source action cannot leave behind a
+ * Side Chat (or a Side Chat's subagents), while visited tracking keeps legacy
+ * corrupt cycles bounded.
+ */
+function collectLifecycleDescendants(
+  threads: readonly OrchestrationThread[],
+  rootThreadId: OrchestrationThread["id"],
+): OrchestrationThread[] {
+  const descendants: OrchestrationThread[] = [];
+  const visitedThreadIds = new Set<string>([rootThreadId]);
+  const queue: string[] = [rootThreadId];
+
+  for (let index = 0; index < queue.length; index += 1) {
+    const sourceThreadId = queue[index];
+    if (sourceThreadId === undefined) break;
+
+    for (const thread of threads) {
+      const isSubagent = (thread.parentThreadId ?? null) === sourceThreadId;
+      const isSidechat = (thread.sidechatSourceThreadId ?? null) === sourceThreadId;
+      if ((!isSubagent && !isSidechat) || visitedThreadIds.has(thread.id)) continue;
+
+      visitedThreadIds.add(thread.id);
+      descendants.push(thread);
+      queue.push(thread.id);
+    }
+  }
+
+  return descendants;
 }
 
 /**
@@ -1142,6 +1196,23 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         });
       }
 
+      const sidechatSourceThreadId = command.sidechatSourceThreadId ?? null;
+      if (sidechatSourceThreadId !== null && sidechatSourceThreadId !== command.sourceThreadId) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Side Chat source '${sidechatSourceThreadId}' must match fork source '${command.sourceThreadId}'.`,
+        });
+      }
+      if (
+        sidechatSourceThreadId !== null &&
+        (sourceThread.sidechatSourceThreadId ?? null) !== null
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Side Chat source '${command.sourceThreadId}' is already a Side Chat. Nested Side Chats are not supported.`,
+        });
+      }
+
       const createdEvent: Omit<OrchestrationEvent, "sequence"> = {
         ...withEventBase({
           aggregateKind: "thread",
@@ -1153,7 +1224,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           projectId: command.projectId,
-          title: command.sidechatSourceThreadId
+          title: sidechatSourceThreadId
             ? command.title
             : buildForkThreadTitle(
                 sourceThread,
@@ -1162,16 +1233,20 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           modelSelection: command.modelSelection,
           runtimeMode: command.runtimeMode,
           interactionMode: command.interactionMode,
-          ...resolveCreatedThreadWorkspaceMetadata(project.kind, command),
+          ...resolveForkedThreadWorkspaceMetadata(project.kind, command, sourceThread),
           createBranchFlowCompleted:
-            project.kind === "studio" ? false : command.createBranchFlowCompleted,
+            project.kind === "studio"
+              ? false
+              : sidechatSourceThreadId
+                ? sourceThread.createBranchFlowCompleted
+                : command.createBranchFlowCompleted,
           isPinned: false,
           parentThreadId: null,
           subagentAgentId: null,
           subagentNickname: null,
           subagentRole: null,
           forkSourceThreadId: command.sourceThreadId,
-          sidechatSourceThreadId: command.sidechatSourceThreadId,
+          sidechatSourceThreadId,
           handoff: null,
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
@@ -1222,19 +1297,36 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         });
       }
       const occurredAt = nowIso();
-      return {
-        ...withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt,
-          commandId: command.commandId,
+      // Deletion historically does not cascade through subagent parentage.
+      // Preserve that behavior while making direct Side Chats source-owned.
+      const sidechatThreads = readModel.threads.filter(
+        (candidate) =>
+          candidate.deletedAt === null &&
+          (candidate.sidechatSourceThreadId ?? null) === command.threadId,
+      );
+      const revertingSidechat = sidechatThreads.find(threadHasCheckpointRevertInProgress);
+      if (revertingSidechat) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: checkpointRevertDeleteInProgressDetail(revertingSidechat.id),
+        });
+      }
+      const events = [...sidechatThreads.map((candidate) => candidate.id), command.threadId].map(
+        (threadId): Omit<OrchestrationEvent, "sequence"> => ({
+          ...withEventBase({
+            aggregateKind: "thread",
+            aggregateId: threadId,
+            occurredAt,
+            commandId: command.commandId,
+          }),
+          type: "thread.deleted",
+          payload: {
+            threadId,
+            deletedAt: occurredAt,
+          },
         }),
-        type: "thread.deleted",
-        payload: {
-          threadId: command.threadId,
-          deletedAt: occurredAt,
-        },
-      };
+      );
+      return events.length === 1 ? events[0]! : events;
     }
 
     case "thread.archive": {
@@ -1244,13 +1336,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         threadId: command.threadId,
       });
       const occurredAt = nowIso();
-      // Subagent threads are only reachable through their parent, so archiving a
-      // thread archives its still-active subagent subtree with it. The commanded
-      // thread goes last: the command receipt records the final event's aggregate.
-      const subagentThreadIds = collectSubagentDescendants(readModel.threads, command.threadId)
+      // Side Chats and subagent threads are only reachable through their source,
+      // so archive the still-active linked subtree with it. The commanded thread
+      // goes last: the command receipt records the final event's aggregate.
+      const lifecycleThreadIds = collectLifecycleDescendants(readModel.threads, command.threadId)
         .filter((thread) => thread.deletedAt === null && (thread.archivedAt ?? null) === null)
         .map((thread) => thread.id);
-      return [...subagentThreadIds, command.threadId].map(
+      return [...lifecycleThreadIds, command.threadId].map(
         (threadId): Omit<OrchestrationEvent, "sequence"> => ({
           ...withEventBase({
             aggregateKind: "thread",
@@ -1275,13 +1367,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         threadId: command.threadId,
       });
       const occurredAt = nowIso();
-      // Restoring a parent brings back the subagent subtree that was archived with
-      // it. The commanded thread goes last: the command receipt records the final
-      // event's aggregate.
-      const subagentThreadIds = collectSubagentDescendants(readModel.threads, command.threadId)
+      // Restoring a source brings back the Side Chat/subagent subtree archived
+      // with it. The commanded thread goes last for command-receipt semantics.
+      const lifecycleThreadIds = collectLifecycleDescendants(readModel.threads, command.threadId)
         .filter((thread) => thread.deletedAt === null && (thread.archivedAt ?? null) !== null)
         .map((thread) => thread.id);
-      return [...subagentThreadIds, command.threadId].map(
+      return [...lifecycleThreadIds, command.threadId].map(
         (threadId): Omit<OrchestrationEvent, "sequence"> => ({
           ...withEventBase({
             aggregateKind: "thread",

@@ -39,6 +39,7 @@ import {
   SINGLE_CHAT_PANE_SCOPE_ID,
 } from "../../lib/chatPaneScope";
 import type { DockPaneRuntimeMode } from "../../lib/dockPaneActivation";
+import { dockTerminalThreadId } from "../../lib/dockTerminalScope";
 import type { FileCommentSelection } from "../../lib/fileComments";
 import { gitBranchesQueryOptions } from "../../lib/gitReactQuery";
 import { canComposerHandlePanelWidth } from "../../lib/panelResize";
@@ -59,6 +60,7 @@ import {
 } from "../../lib/workspaceFileOpener";
 import { requestExplorerReveal } from "../../explorerRevealRequestStore";
 import { projectScriptRuntimeEnv } from "../../projectScripts";
+import { readNativeApi } from "../../nativeApi";
 import { selectRightDockState, useRightDockStore } from "../../rightDockStore";
 import {
   resolveActivePane,
@@ -73,6 +75,7 @@ import {
   useSplitViewStore,
 } from "../../splitViewStore";
 import { useStore } from "../../store";
+import { useTerminalStateStore } from "../../terminalStateStore";
 import {
   createProjectSelector,
   createSidebarThreadSummariesSelector,
@@ -109,6 +112,7 @@ import { RouteInsetSurface } from "../RouteInsetSurface";
 import { SidebarInset } from "../ui/sidebar";
 import { toastManager } from "../ui/toast";
 import { WorkspaceSearchPalette, type WorkspaceSearchPaletteMode } from "../WorkspaceSearchPalette";
+import { disposeAndCloseTerminalThreadSessions } from "../terminal/terminalSession";
 import {
   collectParentDirectoryPaths,
   resolveFilePreviewWorkspaceRoot,
@@ -224,10 +228,7 @@ export function SingleChatSurface(props: {
       threadWorkspaceMetadata.workingDirectory ?? draftThread?.workingDirectory ?? null,
   });
   const terminalRuntimeProjectCwd =
-    threadWorkspaceMetadata.workingDirectory ??
-    draftThread?.workingDirectory ??
-    activeProject?.cwd ??
-    workspaceRoot;
+    threadWorkspaceMetadata.workingDirectory ?? draftThread?.workingDirectory ?? workspaceRoot;
   const terminalWorktreePath =
     threadWorkspaceMetadata.worktreePath ?? draftThread?.worktreePath ?? null;
   const terminalRuntimeEnv = terminalRuntimeProjectCwd
@@ -334,6 +335,7 @@ export function SingleChatSurface(props: {
   } = useDockPaneRuntimeActivation({
     threadId: props.threadId,
     activePane,
+    dockOpen: dockState.open,
   });
 
   // Bridge the dock's active browser/diff pane back into the panelState shape the
@@ -358,6 +360,9 @@ export function SingleChatSurface(props: {
     toggleSingletonPane(props.threadId, { kind: "browser" });
   };
   const handleToggleRightDock = () => {
+    if (!dockState.open) {
+      requestActiveDockPaneLive();
+    }
     setDockOpen(props.threadId, !dockState.open);
   };
   const handleOpenBrowserUrl = () => {
@@ -820,6 +825,30 @@ export function SingleChatSurface(props: {
     openPane(props.threadId, { kind });
   };
 
+  const handleCloseDockPane = async (paneId: string) => {
+    const pane = dockState.panes.find((candidate) => candidate.id === paneId);
+    if (pane?.kind === "terminal") {
+      const scopeId = dockTerminalThreadId(props.threadId);
+      try {
+        await disposeAndCloseTerminalThreadSessions({
+          api: readNativeApi(),
+          threadId: scopeId,
+          deleteHistory: true,
+        });
+        useTerminalStateStore.getState().clearTerminalState(scopeId);
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: "Could not close Terminal",
+          description:
+            error instanceof Error ? error.message : "The terminal process could not be closed.",
+        });
+        return;
+      }
+    }
+    closePane(props.threadId, paneId);
+  };
+
   const renderDockPane = (
     pane: RightDockPane,
     context: { runtimeMode: DockPaneRuntimeMode; isActive: boolean; isVisible: boolean },
@@ -890,10 +919,10 @@ export function SingleChatSurface(props: {
           <Suspense fallback={<PanelStateMessage>Loading terminal...</PanelStateMessage>}>
             <DockTerminalPane
               hostThreadId={props.threadId}
-              cwd={workspaceRoot}
+              cwd={terminalRuntimeProjectCwd ?? workspaceRoot}
               runtimeEnv={terminalRuntimeEnv}
               isActive={context.isActive && dockState.open}
-              onClosePanel={() => closePane(props.threadId, pane.id)}
+              onClosePanel={() => void handleCloseDockPane(pane.id)}
             />
           </Suspense>
         );
@@ -1140,9 +1169,12 @@ export function SingleChatSurface(props: {
           {...(paneLabelOverrides ? { paneLabelOverrides } : {})}
           {...(paneIconOverrides ? { paneIconOverrides } : {})}
           onSelectPane={handleSelectDockPane}
-          onClosePane={(paneId) => closePane(props.threadId, paneId)}
+          onClosePane={(paneId) => void handleCloseDockPane(paneId)}
           onCollapse={() => setDockOpen(props.threadId, false)}
-          onOpenChange={(open) => setDockOpen(props.threadId, open)}
+          onOpenChange={(open) => {
+            if (open) requestActiveDockPaneLive();
+            setDockOpen(props.threadId, open);
+          }}
           onAddPane={handleAddDockPane}
           renderPane={renderDockPane}
         />

@@ -6,9 +6,11 @@ import type { Project, Thread } from "../types";
 import {
   clearSidechatPaneRetention,
   createOrJoinSidechat,
+  createSidechatPreservingComposerDraft,
   createSidechatThread,
   getSidechatPaneRetentionVersion,
   sidechatPaneRetentionRemainingMs,
+  sidechatCreationFlightKey,
   subscribeSidechatPaneRetention,
   type SidechatCreationFlight,
   type SidechatCreationResult,
@@ -223,6 +225,86 @@ describe("sidechat pane retention", () => {
     expect(sidechatPaneRetentionRemainingMs(threadId, 1_000)).toBe(15_000);
     expect(sidechatPaneRetentionRemainingMs(threadId, 15_999)).toBe(1);
     expect(sidechatPaneRetentionRemainingMs(threadId, 16_000)).toBe(0);
+  });
+});
+
+describe("sidechat creation identity", () => {
+  it("separates different models and options under the same provider", () => {
+    const sourceThreadId = ThreadId.makeUnsafe("source-model-key");
+    const base = sidechatCreationFlightKey(sourceThreadId, {
+      provider: "codex",
+      model: "openrouter/model-a",
+      options: { reasoningEffort: "high" },
+    });
+
+    expect(
+      sidechatCreationFlightKey(sourceThreadId, {
+        provider: "codex",
+        model: "openrouter/model-b",
+        options: { reasoningEffort: "high" },
+      }),
+    ).not.toBe(base);
+    expect(
+      sidechatCreationFlightKey(sourceThreadId, {
+        provider: "codex",
+        model: "openrouter/model-a",
+        options: { reasoningEffort: "low" },
+      }),
+    ).not.toBe(base);
+  });
+
+  it("keeps the key stable when option property insertion order differs", () => {
+    const sourceThreadId = ThreadId.makeUnsafe("source-stable-key");
+    const first = {
+      provider: "codex",
+      model: "openrouter/model-a",
+      options: { reasoningEffort: "high", fastMode: true },
+    } as const;
+    const second = {
+      provider: "codex",
+      model: "openrouter/model-a",
+      options: { fastMode: true, reasoningEffort: "high" },
+    } as const;
+
+    expect(sidechatCreationFlightKey(sourceThreadId, first)).toBe(
+      sidechatCreationFlightKey(sourceThreadId, second),
+    );
+  });
+});
+
+describe("sidechat slash draft preservation", () => {
+  it("keeps the draft when durable creation fails", async () => {
+    const clearDraft = vi.fn();
+
+    await expect(
+      createSidechatPreservingComposerDraft({
+        readDraft: () => "/side inspect this",
+        clearDraft,
+        create: () => Promise.reject(new Error("fork rejected")),
+      }),
+    ).rejects.toThrow("fork rejected");
+    expect(clearDraft).not.toHaveBeenCalled();
+  });
+
+  it("clears only an unchanged draft after durable creation", async () => {
+    let draft = "/side inspect this";
+    const clearDraft = vi.fn();
+    await createSidechatPreservingComposerDraft({
+      readDraft: () => draft,
+      clearDraft,
+      create: () => Promise.resolve(),
+    });
+    expect(clearDraft).toHaveBeenCalledOnce();
+
+    draft = "/side original";
+    await createSidechatPreservingComposerDraft({
+      readDraft: () => draft,
+      clearDraft,
+      create: async () => {
+        draft = "new text typed during creation";
+      },
+    });
+    expect(clearDraft).toHaveBeenCalledOnce();
   });
 });
 

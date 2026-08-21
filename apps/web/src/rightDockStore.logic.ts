@@ -400,6 +400,19 @@ export function findMissingSidechatPaneIds(
   );
 }
 
+export function closeThreadPaneReferencesInState(
+  state: RightDockThreadState,
+  threadId: ThreadId,
+): RightDockThreadState {
+  return state.panes.reduce(
+    (next, pane) =>
+      pane.kind === "sidechat" && pane.threadId === threadId
+        ? closePaneInState(next, pane.id)
+        : next,
+    state,
+  );
+}
+
 // An active sidechat embeds a full chat, so it needs a detail lease just like a
 // split-view pane. Persisted inactive or currently unrendered docks stay out of
 // the scarce live-stream budget.

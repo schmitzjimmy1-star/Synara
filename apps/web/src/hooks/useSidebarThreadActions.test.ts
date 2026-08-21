@@ -95,6 +95,8 @@ const harness = vi.hoisted(() => ({
   removeThreadFromSplitViews: vi.fn(),
   clearTemporaryThread: vi.fn(),
   clearTerminalState: vi.fn(),
+  clearThreadDockState: vi.fn(),
+  closeThreadPaneReferences: vi.fn(),
   handleNewChat: vi.fn(),
   removeDeletedThreadFromClientState: vi.fn(),
   resolveSplitViewPaneIdForThread: vi.fn(),
@@ -146,6 +148,13 @@ vi.mock("../splitViewStore", () => {
 vi.mock("../temporaryThreadStore", () => ({
   useTemporaryThreadStore: (selector: (state: unknown) => unknown) =>
     selector({ clearTemporaryThread: harness.clearTemporaryThread }),
+}));
+vi.mock("../rightDockStore", () => ({
+  useRightDockStore: (selector: (state: unknown) => unknown) =>
+    selector({
+      clearThreadDockState: harness.clearThreadDockState,
+      closeThreadPaneReferences: harness.closeThreadPaneReferences,
+    }),
 }));
 vi.mock("../threadSelectionStore", () => ({
   useThreadSelectionStore: (selector: (state: unknown) => unknown) =>
@@ -280,6 +289,8 @@ beforeEach(() => {
     harness.removeThreadFromSplitViews,
     harness.clearTemporaryThread,
     harness.clearTerminalState,
+    harness.clearThreadDockState,
+    harness.closeThreadPaneReferences,
     harness.handleNewChat,
     harness.resolveSplitViewPaneIdForThread,
     harness.resolveSplitViewFocusedThreadId,
@@ -500,6 +511,8 @@ describe("useSidebarThreadActions", () => {
     expect(harness.removeThreadFromSplitViews).toHaveBeenCalledWith(THREAD_ID);
     expect(harness.clearDraftThread).toHaveBeenCalledWith(THREAD_ID);
     expect(harness.clearTerminalState).toHaveBeenCalledWith(THREAD_ID);
+    expect(harness.clearThreadDockState).toHaveBeenCalledWith(THREAD_ID);
+    expect(harness.closeThreadPaneReferences).toHaveBeenCalledWith(THREAD_ID);
     const navigation = harness.navigate.mock.calls.at(-1)?.[0] as {
       params: { threadId: ThreadId };
       search: () => { splitViewId: string };

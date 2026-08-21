@@ -10,6 +10,7 @@ const harness = vi.hoisted(() => ({
   dispatchCommand: vi.fn(),
   confirm: vi.fn(),
   disposeThread: vi.fn(),
+  closeTerminalThread: vi.fn(),
   reconcile: vi.fn(),
   removeDeletedThreadFromClientState: vi.fn(),
   orphanedWorktreePath: null as string | null,
@@ -30,6 +31,7 @@ vi.mock("../nativeApi", () => ({
   readNativeApi: () => ({
     dialogs: { confirm: harness.confirm },
     orchestration: { dispatchCommand: harness.dispatchCommand },
+    terminal: { close: harness.closeTerminalThread },
   }),
 }));
 
@@ -78,6 +80,9 @@ beforeEach(() => {
   harness.disposeThread.mockReset().mockImplementation(() => {
     harness.events.push("terminal.dispose");
   });
+  harness.closeTerminalThread.mockReset().mockImplementation(async () => {
+    harness.events.push("dock-terminal.close");
+  });
   harness.reconcile.mockReset().mockImplementation(() => {
     harness.events.push("reconcile");
   });
@@ -104,6 +109,8 @@ describe("deleteActiveThreadFromClient", () => {
       "prepare",
       "thread.delete",
       "terminal.dispose",
+      "terminal.dispose",
+      "dock-terminal.close",
       "reconcile",
       "onDeleted",
     ]);

@@ -21,6 +21,7 @@ import { readNativeApi } from "~/nativeApi";
 import { selectThreadTerminalState, useTerminalStateStore } from "~/terminalStateStore";
 import { randomTerminalId } from "~/components/terminal/terminalIds";
 import { disposeAndCloseTerminalSession } from "~/components/terminal/terminalSession";
+import { collectTerminalIdsFromLayout } from "~/terminalPaneLayout";
 
 type TerminalMetadata = { cliKind: TerminalCliKind | null; label: string };
 type TerminalActivity = {
@@ -101,13 +102,13 @@ export function useTerminalSurfaceController(threadId: ThreadId) {
     if (!confirmed) {
       return;
     }
-    disposeAndCloseTerminalSession({ api, threadId, terminalId });
+    await disposeAndCloseTerminalSession({ api, threadId, terminalId });
     closeTerminalAndEnsureReplacementStore(threadId, terminalId, randomTerminalId());
     bumpFocusRequest();
   };
 
   const disposeExitedTerminal = (terminalId: string) => {
-    disposeAndCloseTerminalSession({
+    void disposeAndCloseTerminalSession({
       api: readNativeApi(),
       threadId,
       terminalId,
@@ -128,7 +129,18 @@ export function useTerminalSurfaceController(threadId: ThreadId) {
     return disposition;
   };
 
-  const closeTerminalGroup = (groupId: string) => closeTerminalGroupStore(threadId, groupId);
+  const closeTerminalGroup = async (groupId: string) => {
+    const group = terminalState.terminalGroups.find((candidate) => candidate.id === groupId);
+    if (!group) return;
+    const terminalIds = collectTerminalIdsFromLayout(group.layout);
+    await Promise.all(
+      terminalIds.map((terminalId) =>
+        disposeAndCloseTerminalSession({ api: readNativeApi(), threadId, terminalId }),
+      ),
+    );
+    closeTerminalGroupStore(threadId, groupId);
+    bumpFocusRequest();
+  };
 
   const setTerminalHeight = (height: number) => setTerminalHeightStore(threadId, height);
 

@@ -269,7 +269,7 @@ export function useChatTerminalController({
         willDeleteThread: shouldDeletePlaceholderThread,
       });
       if (!confirmed) return;
-      disposeAndCloseTerminalSession({
+      await disposeAndCloseTerminalSession({
         api,
         threadId: activeThreadId,
         terminalId,
@@ -301,7 +301,7 @@ export function useChatTerminalController({
     (terminalId: string) => {
       if (!activeThreadId) return;
       const isFinalTerminal = terminalState.terminalIds.length <= 1;
-      disposeAndCloseTerminalSession({
+      void disposeAndCloseTerminalSession({
         api: readNativeApi(),
         threadId: activeThreadId,
         terminalId,
@@ -335,6 +335,26 @@ export function useChatTerminalController({
     terminalState.workspaceLayout,
     terminalWorkspaceOpen,
   ]);
+  const closeTerminalGroup = useCallback(
+    async (groupId: string) => {
+      if (!activeThreadId) return;
+      const group = terminalState.terminalGroups.find((candidate) => candidate.id === groupId);
+      if (!group) return;
+      const terminalIds = collectTerminalIdsFromLayout(group.layout);
+      await Promise.all(
+        terminalIds.map((terminalId) =>
+          disposeAndCloseTerminalSession({
+            api: readNativeApi(),
+            threadId: activeThreadId,
+            terminalId,
+          }),
+        ),
+      );
+      closeTerminalGroupInStore(activeThreadId, groupId);
+      requestTerminalFocus();
+    },
+    [activeThreadId, closeTerminalGroupInStore, requestTerminalFocus, terminalState.terminalGroups],
+  );
 
   return {
     terminalState,
@@ -355,7 +375,7 @@ export function useChatTerminalController({
     openTerminalThreadPageInStore,
     newTerminalInStore,
     setActiveTerminalInStore,
-    closeTerminalGroupInStore,
+    closeTerminalGroupInStore: closeTerminalGroup,
     resizeTerminalSplitInStore,
     toggleTerminalVisibility,
     expandTerminalWorkspace,
