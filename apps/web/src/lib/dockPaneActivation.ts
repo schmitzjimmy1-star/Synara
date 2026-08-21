@@ -87,7 +87,6 @@ export function scheduleDeferredDockPaneHydration(input: {
 }
 
 const DEFERRED_RUNTIME_PANE_KINDS: ReadonlySet<RightDockPaneKind> = new Set<RightDockPaneKind>([
-  "agentBrowser",
   "browser",
   "sidechat",
   "terminal",
@@ -104,7 +103,6 @@ const DEFERRED_RUNTIME_PANE_KINDS: ReadonlySet<RightDockPaneKind> = new Set<Righ
 // while another tab is active — otherwise switching tabs would tear the subtree
 // down and reset the explorer to its workspace root on return.
 const KEEP_MOUNTED_PANE_KINDS: ReadonlySet<RightDockPaneKind> = new Set<RightDockPaneKind>([
-  "agentBrowser",
   "terminal",
   "explorer",
 ]);

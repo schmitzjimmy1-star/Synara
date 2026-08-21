@@ -18,7 +18,6 @@ import { scheduleDeferredChatMount } from "./deferredChatMount";
 
 const DiffPanel = lazy(() => import("../DiffPanel"));
 export const LazyBrowserPanel = lazy(() => import("../BrowserPanel"));
-export const LazyAgentBrowserPanel = lazy(() => import("../AgentBrowserPanel"));
 
 export const noopChatSurfaceAction = () => {};
 

@@ -83,7 +83,6 @@ import { ChatPaneDropOverlay } from "../chat-drop-overlay/ChatPaneDropOverlay";
 import {
   ChatMountLoader,
   DeferredChatView,
-  LazyAgentBrowserPanel,
   LazyBrowserPanel,
   LazyDiffPanel,
   noopChatSurfaceAction,
@@ -341,11 +340,9 @@ export function SingleChatSurface(props: {
   // chat shell still consumes (diff badge, toggle pressed state, transcript gating).
   const chatPanelState: SplitViewPanePanelState = {
     panel:
-      activePane?.kind === "agentBrowser"
-        ? "browser"
-        : activePane && (activePane.kind === "browser" || activePane.kind === "diff")
-          ? activePane.kind
-          : null,
+      activePane && (activePane.kind === "browser" || activePane.kind === "diff")
+        ? activePane.kind
+        : null,
     diffTurnId: activePane?.kind === "diff" ? activePane.diffTurnId : null,
     diffFilePath: activePane?.kind === "diff" ? activePane.diffFilePath : null,
     hasOpenedPanel: dockState.panes.length > 0,
@@ -357,8 +354,8 @@ export function SingleChatSurface(props: {
     toggleSingletonPane(props.threadId, { kind: "diff" });
   };
   const handleToggleBrowser = () => {
-    requestImmediateDockHydration("agentBrowser");
-    toggleSingletonPane(props.threadId, { kind: "agentBrowser" });
+    requestImmediateDockHydration("browser");
+    toggleSingletonPane(props.threadId, { kind: "browser" });
   };
   const handleToggleRightDock = () => {
     setDockOpen(props.threadId, !dockState.open);
@@ -647,8 +644,8 @@ export function SingleChatSurface(props: {
 
   useBrowserPanelDesktopBridge({
     onToggle: () => {
-      requestImmediateDockHydration("agentBrowser");
-      toggleSingletonPane(props.threadId, { kind: "agentBrowser" });
+      requestImmediateDockHydration("browser");
+      toggleSingletonPane(props.threadId, { kind: "browser" });
     },
     onOpen: (requestedThreadId) => {
       routeSingleBrowserPanelOpenRequest({
@@ -828,17 +825,6 @@ export function SingleChatSurface(props: {
     context: { runtimeMode: DockPaneRuntimeMode; isActive: boolean; isVisible: boolean },
   ): ReactNode => {
     switch (pane.kind) {
-      case "agentBrowser":
-        return (
-          <Suspense fallback={<PanelStateMessage>Loading Agent Browser...</PanelStateMessage>}>
-            <LazyAgentBrowserPanel
-              threadId={props.threadId}
-              runtimeMode={context.runtimeMode}
-              isVisible={context.isVisible}
-              onRequestLive={requestActiveDockPaneLive}
-            />
-          </Suspense>
-        );
       case "browser":
         return (
           <Suspense fallback={<PanelStateMessage>Loading browser...</PanelStateMessage>}>

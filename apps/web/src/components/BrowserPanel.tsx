@@ -23,6 +23,7 @@ import {
   GlobeIcon,
   LinkIcon,
   LoaderCircleIcon,
+  PaperclipIcon,
   type LucideIcon,
   PlusIcon,
   RefreshCwIcon,
@@ -57,7 +58,7 @@ import {
 } from "../browserStateStore";
 import { useComposerDraftStore, type BrowserAnnotationDraft } from "../composerDraftStore";
 import { anchoredToastManager } from "./ui/toast";
-import { prepareComposerImageFromBrowserScreenshot } from "../lib/browserPromptContext";
+import { prepareComposerImageFromBrowserScreenshot } from "../lib/browserScreenshotAttachment";
 import {
   browserAddressDisplayValue,
   browserWebviewInitialUrl,
@@ -1332,7 +1333,7 @@ export function BrowserPanel({
     });
   }, [api, ensureLiveRuntime, runBrowserAction, threadId, upsertThreadState]);
 
-  const onCaptureScreenshot = useCallback(() => {
+  const onSendPageToCodex = useCallback(() => {
     if (!ensureLiveRuntime()) {
       return;
     }
@@ -1366,6 +1367,11 @@ export function BrowserPanel({
           );
         }
         setLocalError(null);
+        toastManager.add({
+          type: "success",
+          title: "Page attached to composer",
+          description: "Add your instructions, then send when you’re ready.",
+        });
       } catch (cause) {
         setLocalError(
           cause instanceof Error ? cause.message : "The browser screenshot could not be prepared.",
@@ -1664,6 +1670,19 @@ export function BrowserPanel({
         ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-1 [-webkit-app-region:no-drag]">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-7 gap-1.5 px-2 text-xs"
+          disabled={!activeTab}
+          aria-label="Send page to Codex"
+          title="Attach the current page to the composer"
+          onClick={onSendPageToCodex}
+        >
+          <PaperclipIcon className="size-3.5" />
+          <span className="hidden xl:inline">Send page to Codex</span>
+        </Button>
         <BrowserAnnotationButton
           controller={annotationController}
           disabled={
@@ -1728,10 +1747,10 @@ export function BrowserPanel({
             <MenuItem
               className={BROWSER_ACTION_MENU_ITEM_CLASS_NAME}
               disabled={!activeTab}
-              onClick={onCaptureScreenshot}
+              onClick={onSendPageToCodex}
             >
-              <BrowserActionMenuIcon icon={CameraIcon} />
-              <span>Capture screenshot</span>
+              <BrowserActionMenuIcon icon={PaperclipIcon} />
+              <span>Send page to Codex</span>
             </MenuItem>
             <MenuItem
               className={BROWSER_ACTION_MENU_ITEM_CLASS_NAME}

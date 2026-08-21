@@ -34,7 +34,6 @@ import {
   type UserInputQuestion,
 } from "@synara/contracts";
 import { prewarmChatGptVoiceTranscriptionConnection } from "@synara/shared/chatGptVoiceTranscription";
-import { buildSynaraAgentBrowserEnvironment } from "@synara/shared/agentBrowser";
 import { resolveCodexBinary } from "@synara/shared/codexBinary";
 import { getModelSelectionBooleanOptionValue, normalizeModelSlug } from "@synara/shared/model";
 import { decodeSubagentReceiverThreadIds } from "@synara/shared/subagents";
@@ -950,16 +949,12 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     this.taskCompleteFallbackGraceMs = Math.max(0, options?.taskCompleteFallbackGraceMs ?? 750);
   }
 
-  private async buildSessionProcessEnv(
-    threadId: ThreadId,
-    homePath: string | undefined,
-    profile?: string,
-  ) {
+  private async buildSessionProcessEnv(homePath: string | undefined, profile?: string) {
     const env = await buildCodexProcessEnv({
       ...(homePath ? { homePath } : {}),
       ...(profile ? { profile } : {}),
     });
-    return { ...env, ...buildSynaraAgentBrowserEnvironment(threadId) };
+    return env;
   }
 
   async startSession(input: CodexAppServerStartSessionInput): Promise<ProviderSession> {
@@ -993,7 +988,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       const configuredCodexBinaryPath = codexOptions.binaryPath ?? "codex";
       const codexHomePath = codexOptions.homePath;
       const codexProfile = codexOptions.profile;
-      const processEnv = await this.buildSessionProcessEnv(threadId, codexHomePath, codexProfile);
+      const processEnv = await this.buildSessionProcessEnv(codexHomePath, codexProfile);
       const codexBinaryPath = resolveCodexBinary({
         configuredPath: configuredCodexBinaryPath,
         env: processEnv,
@@ -1752,7 +1747,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       const configuredCodexBinaryPath = codexOptions.binaryPath ?? "codex";
       const codexHomePath = codexOptions.homePath;
       const codexProfile = codexOptions.profile;
-      const processEnv = await this.buildSessionProcessEnv(threadId, codexHomePath, codexProfile);
+      const processEnv = await this.buildSessionProcessEnv(codexHomePath, codexProfile);
       const codexBinaryPath = resolveCodexBinary({
         configuredPath: configuredCodexBinaryPath,
         env: processEnv,
