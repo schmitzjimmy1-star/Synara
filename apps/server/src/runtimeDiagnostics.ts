@@ -2,7 +2,6 @@
 // Purpose: Build a secret-safe, server-authoritative snapshot of the Codex runtime Synara delegates to.
 // Layer: Server runtime diagnostics
 
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import type {
@@ -11,84 +10,12 @@ import type {
   ServerDiagnosticsResult,
 } from "@synara/contracts";
 import { resolveCodexBinary } from "@synara/shared/codexBinary";
-import {
-  parseCodexConfigMcpServerCount,
-  parseCodexConfigModelProvider,
-  parseCodexCustomProviderProfile,
-} from "@synara/shared/codexConfig";
+import { resolveEffectiveCodexRoute } from "@synara/shared/codexConfig";
 
 import { resolveBaseCodexHomePath } from "./codexHomePaths.ts";
-import { applyCodexProfileLayer, buildCodexProcessEnv } from "./codexProcessEnv.ts";
+import { buildCodexProcessEnv } from "./codexProcessEnv.ts";
 
 type CodexDiagnostics = ServerDiagnosticsResult["codex"];
-
-async function readOptionalFile(filePath: string): Promise<string | undefined> {
-  try {
-    return await readFile(filePath, "utf8");
-  } catch (cause) {
-    if ((cause as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw cause;
-  }
-}
-
-function describeRoute(input: {
-  readonly config: string;
-  readonly profile: string | null;
-  readonly profileConfigPresent: boolean;
-}): CodexDiagnostics["route"] {
-  if (input.profile !== null && !input.profileConfigPresent) {
-    return {
-      status: "invalid",
-      provider: null,
-      kind: "unknown",
-      baseUrl: null,
-      wireApi: null,
-      credentialSource: null,
-      detail: `Profile '${input.profile}' is missing its config file.`,
-    };
-  }
-
-  const provider = parseCodexConfigModelProvider(input.config) ?? "openai";
-  if (provider === "openai") {
-    return {
-      status: "ready",
-      provider,
-      kind: "openai",
-      baseUrl: null,
-      wireApi: "responses",
-      credentialSource: "codex-auth",
-    };
-  }
-
-  const customProvider = parseCodexCustomProviderProfile(input.config);
-  if (!customProvider || customProvider.provider !== provider) {
-    return {
-      status: "invalid",
-      provider,
-      kind: "custom-incompatible",
-      baseUrl: null,
-      wireApi: null,
-      credentialSource: null,
-      detail:
-        "The active custom provider is missing a safe HTTPS endpoint or one credential source.",
-    };
-  }
-
-  const responsesCompatible = customProvider.wireApi === "responses";
-  return {
-    status: responsesCompatible ? "ready" : "invalid",
-    provider,
-    kind: responsesCompatible ? "custom-responses" : "custom-incompatible",
-    baseUrl: customProvider.baseUrl,
-    wireApi: customProvider.wireApi,
-    credentialSource: customProvider.credentialSource,
-    ...(!responsesCompatible
-      ? {
-          detail: `Codex requires the Responses wire API; this route uses '${customProvider.wireApi}'.`,
-        }
-      : {}),
-  };
-}
 
 export async function buildCodexRuntimeDiagnostics(input: {
   readonly settings: CodexServerProviderSettings;
@@ -100,13 +27,11 @@ export async function buildCodexRuntimeDiagnostics(input: {
     resolveBaseCodexHomePath(env, input.settings.homePath.trim() || undefined),
   );
   const profile = input.settings.profile.trim() || null;
-  const baseConfig = (await readOptionalFile(path.join(sourceHomePath, "config.toml"))) ?? "";
-  const profileConfig = profile
-    ? await readOptionalFile(path.join(sourceHomePath, `${profile}.config.toml`))
-    : undefined;
-  const effectiveConfig = profileConfig
-    ? applyCodexProfileLayer(baseConfig, profileConfig)
-    : baseConfig;
+  const effectiveRoute = resolveEffectiveCodexRoute({
+    env,
+    homePath: sourceHomePath,
+    ...(profile ? { profile } : {}),
+  });
 
   let binary: CodexDiagnostics["binary"];
   try {
@@ -155,13 +80,17 @@ export async function buildCodexRuntimeDiagnostics(input: {
     binary,
     sourceHomePath,
     profile,
-    profileConfigPresent: profile === null || profileConfig !== undefined,
-    route: describeRoute({
-      config: effectiveConfig,
-      profile,
-      profileConfigPresent: profile === null || profileConfig !== undefined,
-    }),
-    configuredMcpServerCount: parseCodexConfigMcpServerCount(effectiveConfig),
+    profileConfigPresent: effectiveRoute.profileConfigPresent,
+    route: {
+      status: effectiveRoute.status,
+      provider: effectiveRoute.provider,
+      kind: effectiveRoute.kind,
+      baseUrl: effectiveRoute.baseUrl,
+      wireApi: effectiveRoute.wireApi,
+      credentialSource: effectiveRoute.credentialSource,
+      ...(effectiveRoute.detail ? { detail: effectiveRoute.detail } : {}),
+    },
+    configuredMcpServerCount: effectiveRoute.configuredMcpServerCount,
     activeSessions: {
       totalCount: codexSessions.length,
       runningCount: codexSessions.filter((session) => session.status === "running").length,

@@ -9,8 +9,6 @@ import {
   DEFAULT_GIT_TEXT_GENERATION_MODEL,
   DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_SERVER_SETTINGS,
-  OPENROUTER_CODEX_DEFAULT_MODEL,
-  OPENROUTER_CODEX_MODELS,
   type ModelSelection,
   ServerSettings,
   ServerSettingsError,
@@ -18,7 +16,7 @@ import {
   type ServerSettingsView,
 } from "@synara/contracts";
 import { deepMerge, type DeepPartial } from "@synara/shared/Struct";
-import { isOpenRouterCodexConfig } from "@synara/shared/codexConfig";
+import { resolveEffectiveCodexRoute } from "@synara/shared/codexConfig";
 import { applyServerSettingsPatch } from "@synara/shared/serverSettings";
 import {
   Cause,
@@ -314,33 +312,38 @@ const makeServerSettings = Effect.gen(function* () {
   const detectedOpenRouterHome = path.join(homeDir, ".codex");
   const detectedOpenRouterProfile = "openrouter";
   const legacyOpenRouterHome = path.join(homeDir, ".codex-openrouter");
-  const defaultSettings = fs
-    .readFileString(path.join(detectedOpenRouterHome, `${detectedOpenRouterProfile}.config.toml`))
-    .pipe(
-      Effect.map(isOpenRouterCodexConfig),
-      Effect.catch(() => Effect.succeed(false)),
-      Effect.map(
-        (hasValidatedOpenRouterHome): ServerSettings =>
-          hasValidatedOpenRouterHome
-            ? {
-                ...DEFAULT_SERVER_SETTINGS,
-                textGenerationModelSelection: {
-                  provider: "codex",
-                  model: OPENROUTER_CODEX_DEFAULT_MODEL,
+  const isValidatedOpenRouterRoute = (homePath: string, profile: string): boolean => {
+    try {
+      const route = resolveEffectiveCodexRoute({ homePath, profile });
+      return (
+        route.status === "ready" &&
+        route.kind === "custom-responses" &&
+        route.provider === "openrouter"
+      );
+    } catch {
+      return false;
+    }
+  };
+  const defaultSettings = Effect.sync(() =>
+    isValidatedOpenRouterRoute(detectedOpenRouterHome, detectedOpenRouterProfile),
+  ).pipe(
+    Effect.map(
+      (hasValidatedOpenRouterHome): ServerSettings =>
+        hasValidatedOpenRouterHome
+          ? {
+              ...DEFAULT_SERVER_SETTINGS,
+              providers: {
+                ...DEFAULT_SERVER_SETTINGS.providers,
+                codex: {
+                  ...DEFAULT_SERVER_SETTINGS.providers.codex,
+                  homePath: detectedOpenRouterHome,
+                  profile: detectedOpenRouterProfile,
                 },
-                providers: {
-                  ...DEFAULT_SERVER_SETTINGS.providers,
-                  codex: {
-                    ...DEFAULT_SERVER_SETTINGS.providers.codex,
-                    homePath: detectedOpenRouterHome,
-                    profile: detectedOpenRouterProfile,
-                    customModels: [...OPENROUTER_CODEX_MODELS],
-                  },
-                },
-              }
-            : DEFAULT_SERVER_SETTINGS,
-      ),
-    );
+              },
+            }
+          : DEFAULT_SERVER_SETTINGS,
+    ),
+  );
 
   const loadSettingsFromDisk = Effect.gen(function* () {
     const exists = yield* fs.exists(settingsPath).pipe(
@@ -418,53 +421,27 @@ const makeServerSettings = Effect.gen(function* () {
       ? detectedOpenRouterProfile
       : migratedCodexProfile;
     const hasValidatedOpenRouterProfile = effectiveCodexHome
-      ? yield* fs
-          .readFileString(
-            path.join(
-              effectiveCodexHome,
-              effectiveCodexProfile ? `${effectiveCodexProfile}.config.toml` : "config.toml",
-            ),
-          )
-          .pipe(
-            Effect.map(isOpenRouterCodexConfig),
-            Effect.catch(() => Effect.succeed(false)),
-          )
+      ? isValidatedOpenRouterRoute(effectiveCodexHome, effectiveCodexProfile)
       : false;
     const settingsWithDetectedOpenRouter = hasValidatedOpenRouterProfile
       ? {
           ...migratedSettings,
-          textGenerationModelSelection: {
-            provider: "codex" as const,
-            model:
-              migratedSettings.textGenerationModelSelection.provider === "codex" &&
-              migratedSettings.textGenerationModelSelection.model.includes("/")
-                ? migratedSettings.textGenerationModelSelection.model
-                : OPENROUTER_CODEX_DEFAULT_MODEL,
-          },
           providers: {
             ...migratedSettings.providers,
             codex: {
               ...migratedSettings.providers.codex,
               homePath: effectiveCodexHome,
               profile: effectiveCodexProfile,
-              customModels:
-                migratedSettings.providers.codex.customModels.length > 0
-                  ? migratedSettings.providers.codex.customModels
-                  : [...OPENROUTER_CODEX_MODELS],
             },
           },
         }
       : migratedSettings;
     const normalizedOpenRouterSettings =
       hasValidatedOpenRouterProfile &&
-      (settingsWithDetectedOpenRouter.textGenerationModelSelection.model !==
-        migratedSettings.textGenerationModelSelection.model ||
-        settingsWithDetectedOpenRouter.providers.codex.homePath !==
-          migratedSettings.providers.codex.homePath ||
+      (settingsWithDetectedOpenRouter.providers.codex.homePath !==
+        migratedSettings.providers.codex.homePath ||
         settingsWithDetectedOpenRouter.providers.codex.profile !==
-          migratedSettings.providers.codex.profile ||
-        (migratedSettings.providers.codex.customModels.length === 0 &&
-          settingsWithDetectedOpenRouter.providers.codex.customModels.length > 0));
+          migratedSettings.providers.codex.profile);
     return {
       settings: yield* withCredentialState(settingsWithDetectedOpenRouter),
       revision: decoded.revision,

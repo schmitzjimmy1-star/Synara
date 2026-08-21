@@ -5,9 +5,10 @@
  * discovery. Parsing is read-only; source bytes are never rewritten here.
  */
 import OS from "node:os";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { parse as parseToml, type TomlTable } from "smol-toml";
+import { join, resolve } from "node:path";
+import { parse as parseToml, stringify as stringifyToml, type TomlTable } from "smol-toml";
 
 function isTomlTable(value: unknown): value is TomlTable {
   return (
@@ -21,6 +22,25 @@ function parseCodexConfig(content: string): TomlTable | undefined {
   } catch {
     return undefined;
   }
+}
+
+function mergeTomlTables(base: TomlTable, overlay: TomlTable): TomlTable {
+  const merged: TomlTable = { ...base };
+  for (const [key, overlayValue] of Object.entries(overlay)) {
+    const baseValue = merged[key];
+    merged[key] =
+      isTomlTable(baseValue) && isTomlTable(overlayValue)
+        ? mergeTomlTables(baseValue, overlayValue)
+        : overlayValue;
+  }
+  return merged;
+}
+
+/** Applies Synara's compatibility sidecar profile over the base Codex config. */
+export function layerCodexConfig(baseConfig: string, profileConfig: string): string {
+  const base = baseConfig.trim() ? parseToml(baseConfig) : {};
+  const profile = profileConfig.trim() ? parseToml(profileConfig) : {};
+  return stringifyToml(mergeTomlTables(base, profile)).trimEnd();
 }
 
 function readProviderConfig(content: string, provider: string): TomlTable | undefined {
@@ -77,6 +97,21 @@ export type CodexCustomProviderProfile = {
   readonly credentialSource: "env" | "command";
 };
 
+export type EffectiveCodexRoute = {
+  readonly fingerprint: string;
+  readonly sourceHomePath: string;
+  readonly profile: string | null;
+  readonly profileConfigPresent: boolean;
+  readonly status: "ready" | "invalid";
+  readonly provider: string | null;
+  readonly kind: "openai" | "custom-responses" | "custom-incompatible" | "unknown";
+  readonly baseUrl: string | null;
+  readonly wireApi: string | null;
+  readonly credentialSource: "codex-auth" | "env" | "command" | null;
+  readonly configuredMcpServerCount: number;
+  readonly detail?: string;
+};
+
 /**
  * Reads the active cloud model-provider profile without mutating or normalizing
  * the user's TOML. A usable custom profile must identify its endpoint and a
@@ -85,9 +120,10 @@ export type CodexCustomProviderProfile = {
  */
 export function parseCodexCustomProviderProfile(
   content: string,
+  activeProvider?: string,
 ): CodexCustomProviderProfile | undefined {
-  const provider = parseCodexConfigModelProvider(content);
-  if (!provider || provider === "openai") return undefined;
+  const provider = activeProvider?.trim() || parseCodexConfigModelProvider(content);
+  if (!provider) return undefined;
 
   const rawBaseUrl = parseCodexConfigProviderBaseUrl(content, provider);
   const providerConfig = readProviderConfig(content, provider);
@@ -135,9 +171,174 @@ export function isCodexResponsesProviderConfig(content: string): boolean {
   return parseCodexCustomProviderProfile(content)?.wireApi === "responses";
 }
 
+/**
+ * Resolves the non-secret identity and compatibility of the exact base +
+ * sidecar profile bytes used for a Codex launch. Credentials and raw config
+ * never leave this boundary.
+ */
+export function resolveEffectiveCodexRoute(
+  input: {
+    readonly env?: NodeJS.ProcessEnv;
+    readonly homePath?: string;
+    readonly profile?: string;
+  } = {},
+): EffectiveCodexRoute {
+  const env = input.env ?? process.env;
+  const sourceHomePath = resolve(input.homePath?.trim() || resolveCodexHome(env));
+  const profile = input.profile?.trim() || null;
+  const basePath = join(sourceHomePath, "config.toml");
+  const profilePath = profile ? join(sourceHomePath, `${profile}.config.toml`) : null;
+  const readOptional = (filePath: string): string | undefined => {
+    try {
+      return readFileSync(filePath, "utf8");
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw cause;
+    }
+  };
+  const baseConfig = readOptional(basePath) ?? "";
+  const profileConfig = profilePath ? readOptional(profilePath) : undefined;
+  const profileConfigPresent = profile === null || profileConfig !== undefined;
+  const fingerprint = createHash("sha256")
+    .update("synara-codex-route-v1\0")
+    .update(sourceHomePath)
+    .update("\0")
+    .update(profile ?? "")
+    .update("\0")
+    .update(baseConfig)
+    .update("\0")
+    .update(profileConfig ?? "")
+    .digest("hex");
+  const invalid = (
+    detail: string,
+    overrides: Partial<Pick<EffectiveCodexRoute, "provider" | "kind">> = {},
+  ): EffectiveCodexRoute => ({
+    fingerprint,
+    sourceHomePath,
+    profile,
+    profileConfigPresent,
+    status: "invalid",
+    provider: overrides.provider ?? null,
+    kind: overrides.kind ?? "unknown",
+    baseUrl: null,
+    wireApi: null,
+    credentialSource: null,
+    configuredMcpServerCount: 0,
+    detail,
+  });
+
+  if (!profileConfigPresent) {
+    return invalid(`Profile '${profile}' is missing its config file.`);
+  }
+
+  let effectiveConfig: string;
+  try {
+    effectiveConfig =
+      profile === null ? baseConfig : layerCodexConfig(baseConfig, profileConfig ?? "");
+  } catch {
+    return invalid("The active Codex configuration is not valid TOML.");
+  }
+  if (effectiveConfig.trim() && !parseCodexConfig(effectiveConfig)) {
+    return invalid("The active Codex configuration is not valid TOML.");
+  }
+
+  const configuredMcpServerCount = parseCodexConfigMcpServerCount(effectiveConfig);
+  const provider = parseCodexConfigModelProvider(effectiveConfig) ?? "openai";
+  const activeProviderConfig = readProviderConfig(effectiveConfig, provider);
+  const hasOpenAiRouteOverride =
+    provider === "openai" &&
+    activeProviderConfig !== undefined &&
+    ["base_url", "env_key", "auth", "wire_api"].some((key) =>
+      Object.prototype.hasOwnProperty.call(activeProviderConfig, key),
+    );
+  if (provider === "openai" && !hasOpenAiRouteOverride) {
+    return {
+      fingerprint,
+      sourceHomePath,
+      profile,
+      profileConfigPresent,
+      status: "ready",
+      provider,
+      kind: "openai",
+      baseUrl: null,
+      wireApi: "responses",
+      credentialSource: "codex-auth",
+      configuredMcpServerCount,
+    };
+  }
+
+  const customProvider = parseCodexCustomProviderProfile(effectiveConfig, provider);
+  if (!customProvider || customProvider.provider !== provider) {
+    return {
+      ...invalid(
+        "The active custom provider is missing a safe HTTPS endpoint or exactly one credential source.",
+        { provider, kind: "custom-incompatible" },
+      ),
+      configuredMcpServerCount,
+    };
+  }
+  if (customProvider.wireApi !== "responses") {
+    return {
+      ...invalid(
+        `Codex requires the Responses wire API; this route uses '${customProvider.wireApi}'.`,
+        {
+          provider,
+          kind: "custom-incompatible",
+        },
+      ),
+      baseUrl: customProvider.baseUrl,
+      wireApi: customProvider.wireApi,
+      credentialSource: customProvider.credentialSource,
+      configuredMcpServerCount,
+    };
+  }
+  return {
+    fingerprint,
+    sourceHomePath,
+    profile,
+    profileConfigPresent,
+    status: "ready",
+    provider,
+    kind: "custom-responses",
+    baseUrl: customProvider.baseUrl,
+    wireApi: customProvider.wireApi,
+    credentialSource: customProvider.credentialSource,
+    configuredMcpServerCount,
+  };
+}
+
+/** Resolves only the active provider's env-var name for a local readiness check. */
+export function resolveEffectiveCodexProviderEnvKey(
+  input: {
+    readonly env?: NodeJS.ProcessEnv;
+    readonly homePath?: string;
+    readonly profile?: string;
+  } = {},
+): string | undefined {
+  const env = input.env ?? process.env;
+  const sourceHomePath = resolve(input.homePath?.trim() || resolveCodexHome(env));
+  const readOptional = (filePath: string): string | undefined => {
+    try {
+      return readFileSync(filePath, "utf8");
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw cause;
+    }
+  };
+  const baseConfig = readOptional(join(sourceHomePath, "config.toml")) ?? "";
+  const profile = input.profile?.trim();
+  const profileConfig = profile
+    ? readOptional(join(sourceHomePath, `${profile}.config.toml`))
+    : undefined;
+  if (profile && profileConfig === undefined) return undefined;
+  const effectiveConfig = profile ? layerCodexConfig(baseConfig, profileConfig ?? "") : baseConfig;
+  const provider = parseCodexConfigModelProvider(effectiveConfig) ?? "openai";
+  return parseCodexConfigProviderEnvKey(effectiveConfig, provider);
+}
+
 export function parseCodexConfigActiveProviderEnvKey(content: string): string | undefined {
   const provider = parseCodexConfigModelProvider(content);
-  if (!provider || provider === "openai") {
+  if (!provider) {
     return undefined;
   }
 

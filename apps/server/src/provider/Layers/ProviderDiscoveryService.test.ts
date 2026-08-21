@@ -94,7 +94,9 @@ const runListSkills = (input: {
 
 const runListModels = (input: {
   adapter: Partial<ProviderAdapterShape<ProviderAdapterError>>;
+  customModels?: string[];
   enabled: boolean;
+  profile?: string;
 }) => {
   const baseLayer = Layer.mergeAll(
     makeConfigLayer(),
@@ -103,7 +105,8 @@ const runListModels = (input: {
         codex: {
           enabled: input.enabled,
           homePath: path.join(homeDir, ".codex-openrouter"),
-          customModels: ["cursor-model", "valid-model", "invalid-model"],
+          profile: input.profile ?? "",
+          customModels: input.customModels ?? ["cursor-model", "valid-model", "invalid-model"],
         },
       },
     }),
@@ -315,6 +318,60 @@ describe("ProviderDiscoveryService.listModels", () => {
           }),
       },
       enabled: true,
+    });
+
+    expect(result.models.map((model) => model.slug)).toEqual([
+      "cursor-model",
+      "valid-model",
+      "invalid-model",
+    ]);
+    expect(result.source).toBe("codex-app-server+curated");
+  });
+
+  it("fails closed when a custom Responses route has no configured models", async () => {
+    const result = await runListModels({
+      adapter: {
+        listModels: () =>
+          Effect.succeed({
+            models: [{ slug: "native-model", name: "Native Model" }],
+            source: "codex-app-server",
+            cached: false,
+          }),
+      },
+      customModels: [],
+      enabled: true,
+    });
+
+    expect(result.models).toEqual([]);
+    expect(result.source).toBe("codex-app-server+curated");
+  });
+
+  it("curates from the effective base plus sidecar profile route", async () => {
+    await writeFile(
+      path.join(homeDir, ".codex-openrouter", "config.toml"),
+      [
+        "[model_providers.acme]",
+        'base_url = "https://models.acme.test/v1"',
+        'wire_api = "responses"',
+        'env_key = "ACME_API_KEY"',
+      ].join("\n"),
+    );
+    await writeFile(
+      path.join(homeDir, ".codex-openrouter", "cloud.config.toml"),
+      'model_provider = "acme"\n',
+    );
+
+    const result = await runListModels({
+      adapter: {
+        listModels: () =>
+          Effect.succeed({
+            models: [{ slug: "cursor-model", name: "Cursor Model" }],
+            source: "codex-app-server",
+            cached: false,
+          }),
+      },
+      enabled: true,
+      profile: "cloud",
     });
 
     expect(result.models.map((model) => model.slug)).toEqual([

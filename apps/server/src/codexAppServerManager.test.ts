@@ -16,6 +16,7 @@ import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { ApprovalRequestId, ThreadId, TurnId, type RuntimeMode } from "@synara/contracts";
+import { resolveEffectiveCodexRoute } from "@synara/shared/codexConfig";
 
 import { buildCodexProcessEnv } from "./codexProcessEnv";
 import {
@@ -1469,6 +1470,97 @@ describe("startSession", () => {
     expect(cwd).toContain(`${path.sep}synara-codex-workspaces${path.sep}thread-1`);
   });
 
+  it("rejects an incompatible custom profile before executing Codex", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "synara-invalid-route-"));
+    const binaryPath = path.join(root, "codex");
+    const markerPath = path.join(root, "executed");
+    writeFileSync(binaryPath, `#!/bin/sh\ntouch '${markerPath}'\n`);
+    chmodSync(binaryPath, 0o755);
+    writeFileSync(
+      path.join(root, "broken.config.toml"),
+      [
+        'model_provider = "chat-host"',
+        "[model_providers.chat-host]",
+        'base_url = "https://chat.example.test/v1"',
+        'wire_api = "chat"',
+        'env_key = "CHAT_HOST_KEY"',
+      ].join("\n"),
+    );
+
+    const manager = new CodexAppServerManager();
+    try {
+      await expect(
+        manager.startSession({
+          threadId: asThreadId("thread-invalid-route"),
+          provider: "codex",
+          runtimeMode: "full-access",
+          cwd: root,
+          providerOptions: { codex: { binaryPath, homePath: root, profile: "broken" } },
+        }),
+      ).rejects.toThrow("Codex requires the Responses wire API");
+      expect(existsSync(markerPath)).toBe(false);
+    } finally {
+      await manager.stopAll();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("recomputes route identity instead of trusting a supplied fingerprint", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "synara-route-fingerprint-"));
+    const binaryPath = path.join(root, "codex");
+    writeFileSync(
+      path.join(root, "config.toml"),
+      [
+        "[model_providers.custom]",
+        'base_url = "https://models.example.test/v1"',
+        'env_key = "CUSTOM_API_KEY"',
+      ].join("\n"),
+    );
+    writeFileSync(path.join(root, "cloud.config.toml"), 'model_provider = "custom"\n');
+    writeFileSync(
+      binaryPath,
+      `#!${process.execPath}
+const readline = require("node:readline");
+if (process.argv.includes("--version")) {
+  process.stdout.write("codex-cli 0.149.0\\n");
+  process.exit(0);
+}
+const lines = readline.createInterface({ input: process.stdin });
+lines.on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.id === undefined) return;
+  const result = message.method === "account/read"
+    ? { type: "apiKey" }
+    : message.method === "thread/start"
+      ? { thread: { id: "provider-thread" } }
+      : {};
+  process.stdout.write(JSON.stringify({ id: message.id, result }) + "\\n");
+});
+`,
+    );
+    chmodSync(binaryPath, 0o755);
+
+    const expected = resolveEffectiveCodexRoute({ homePath: root, profile: "cloud" });
+    const manager = new CodexAppServerManager();
+    try {
+      const session = await manager.startSession({
+        threadId: asThreadId("thread-route-fingerprint"),
+        provider: "codex",
+        runtimeMode: "full-access",
+        cwd: root,
+        providerOptions: {
+          codex: { binaryPath, homePath: root, profile: "cloud", routeFingerprint: "forged" },
+        },
+      });
+
+      expect(session.providerConfigFingerprint).toBe(expected.fingerprint);
+      expect(session.providerConfigFingerprint).not.toBe("forged");
+    } finally {
+      await manager.stopAll();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("reports a missing project working directory instead of a missing Codex CLI", () => {
     const missingCwd = path.join(os.tmpdir(), `synara-missing-cwd-${randomUUID()}`, "old-project");
     expect(() => assertCodexWorkingDirectoryExists(missingCwd)).toThrow(
@@ -2036,7 +2128,18 @@ describe("CodexAppServerManager discovery", () => {
   it("invalidates the model cache when a profile changes in place", async () => {
     const homePath = mkdtempSync(path.join(os.tmpdir(), "synara-model-route-"));
     const profilePath = path.join(homePath, "custom.config.toml");
-    writeFileSync(path.join(homePath, "config.toml"), 'model_provider = "openai"\n', "utf8");
+    writeFileSync(
+      path.join(homePath, "config.toml"),
+      [
+        "[model_providers.acme]",
+        'base_url = "https://acme.example.test/v1"',
+        'env_key = "ACME_API_KEY"',
+        "[model_providers.other]",
+        'base_url = "https://other.example.test/v1"',
+        'env_key = "OTHER_API_KEY"',
+      ].join("\n"),
+      "utf8",
+    );
     writeFileSync(profilePath, 'model_provider = "acme"\n', "utf8");
     const manager = new CodexAppServerManager();
     const context = { session: { status: "ready" } };

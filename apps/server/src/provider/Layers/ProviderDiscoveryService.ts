@@ -12,10 +12,7 @@ import {
   type ProviderListSkillsResult,
   ProviderReadPluginInput,
 } from "@synara/contracts";
-import { isCodexResponsesProviderConfig } from "@synara/shared/codexConfig";
-import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { resolveEffectiveCodexRoute } from "@synara/shared/codexConfig";
 import { Effect, Layer, Option, Schema, SchemaIssue } from "effect";
 
 import { ServerSettingsService } from "../../serverSettings.ts";
@@ -66,16 +63,6 @@ const disabledCapabilitiesForProvider = (
 });
 
 const decodeProviderModelDescriptorOption = Schema.decodeUnknownOption(ProviderModelDescriptor);
-
-async function isValidatedCustomProviderHome(homePath: string, profile: string): Promise<boolean> {
-  try {
-    const resolvedHome = homePath || process.env.CODEX_HOME?.trim() || join(homedir(), ".codex");
-    const configName = profile ? `${profile}.config.toml` : "config.toml";
-    return isCodexResponsesProviderConfig(await readFile(join(resolvedHome, configName), "utf8"));
-  } catch {
-    return false;
-  }
-}
 
 function isolateMalformedModelDescriptors(input: {
   readonly provider: ProviderListModelsInput["provider"];
@@ -274,18 +261,28 @@ const make = Effect.gen(function* () {
       );
       const configuredModels = settings?.providers[parsed.provider].customModels ?? [];
       const configuredModelSet = new Set(configuredModels);
+      const codexRoute =
+        parsed.provider === "codex" && settings !== null
+          ? yield* Effect.try({
+              try: () =>
+                resolveEffectiveCodexRoute({
+                  ...(settings.providers.codex.homePath.trim()
+                    ? { homePath: settings.providers.codex.homePath.trim() }
+                    : {}),
+                  ...(settings.providers.codex.profile.trim()
+                    ? { profile: settings.providers.codex.profile.trim() }
+                    : {}),
+                }),
+              catch: () => null,
+            }).pipe(Effect.orElseSucceed(() => null))
+          : null;
       const shouldCurateCodexModels =
         parsed.provider === "codex" &&
         settings !== null &&
         (settings.providers.codex.homePath.trim().length > 0 ||
           settings.providers.codex.profile.trim().length > 0) &&
-        configuredModelSet.size > 0 &&
-        (yield* Effect.promise(() =>
-          isValidatedCustomProviderHome(
-            settings.providers.codex.homePath.trim(),
-            settings.providers.codex.profile.trim(),
-          ),
-        ));
+        codexRoute?.status === "ready" &&
+        codexRoute.kind === "custom-responses";
       const result = shouldCurateCodexModels
         ? (() => {
             const discoveredBySlug = new Map(

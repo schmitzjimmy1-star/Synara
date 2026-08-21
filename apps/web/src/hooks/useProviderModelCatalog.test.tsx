@@ -53,11 +53,15 @@ const EMPTY_QUERY: QueryResultLike = {
 };
 const modelQueries = new Map<ProviderKind, QueryResultLike>();
 const agentQueries = new Map<ProviderKind, QueryResultLike>();
+let effectiveCodexRouteKind: "openai" | "custom-responses" | "custom-incompatible" | "unknown" =
+  "openai";
 const MODEL_HINTS = { codex: "openai/gpt-5.6-sol" } as const;
 const SETTINGS = {
   antigravityBinaryPath: "",
   cursorApiEndpoint: "",
   cursorBinaryPath: "",
+  codexHomePath: "",
+  codexProfile: "",
   customAntigravityModels: [],
   customClaudeModels: [],
   customCodexModels: ["openrouter/custom-model"],
@@ -114,11 +118,18 @@ function readModelQueryEnabled(provider: ProviderKind): boolean | undefined {
 beforeEach(() => {
   modelQueries.clear();
   agentQueries.clear();
+  effectiveCodexRouteKind = "openai";
   mocks.useAppSettings
     .mockReset()
     .mockReturnValue({ settings: SETTINGS, serverSettings: DEFAULT_SERVER_SETTINGS });
   mocks.useQuery.mockReset().mockImplementation((value: QueryOptionsLike) => {
     const [, resource, provider] = value.queryKey;
+    if (value.queryKey[0] === "server" && resource === "diagnostics") {
+      return {
+        data: { codex: { route: { kind: effectiveCodexRouteKind } } },
+        ...EMPTY_QUERY,
+      };
+    }
     if (resource === "models") {
       return modelQueries.get(provider as ProviderKind) ?? EMPTY_QUERY;
     }
@@ -236,5 +247,104 @@ describe("useProviderModelCatalog", () => {
     expect(catalog?.runtimeModelsByProvider.codex).toEqual([
       { slug: "openai/gpt-5.6-sol", name: "GPT-5.6 Sol" },
     ]);
+  });
+
+  it("fails closed to the configured allowlist when routed discovery is empty", () => {
+    effectiveCodexRouteKind = "custom-responses";
+    mocks.useAppSettings.mockReturnValue({
+      settings: {
+        ...SETTINGS,
+        codexHomePath: "/tmp/codex-home",
+        codexProfile: "cloud",
+      },
+      serverSettings: DEFAULT_SERVER_SETTINGS,
+    });
+
+    const catalog = readCatalogRenders({
+      selectedProvider: "codex",
+      discoveryEnabled: true,
+    }).at(-1);
+
+    expect(catalog?.modelOptionsByProvider.codex.map((model) => model.slug)).toEqual([
+      "openrouter/custom-model",
+    ]);
+    expect(catalog?.modelOptionsByProvider.codex.some((model) => model.slug === "gpt-5.5")).toBe(
+      false,
+    );
+  });
+
+  it("does not resurrect native defaults for a custom route without an allowlist", () => {
+    effectiveCodexRouteKind = "custom-responses";
+    mocks.useAppSettings.mockReturnValue({
+      settings: {
+        ...SETTINGS,
+        codexProfile: "cloud",
+        customCodexModels: [],
+      },
+      serverSettings: DEFAULT_SERVER_SETTINGS,
+    });
+
+    const catalog = readCatalogRenders({
+      selectedProvider: "codex",
+      discoveryEnabled: true,
+    }).at(-1);
+
+    expect(catalog?.modelOptionsByProvider.codex).toEqual([]);
+  });
+
+  it("filters an uncurated routed response back to the configured allowlist", () => {
+    effectiveCodexRouteKind = "custom-responses";
+    mocks.useAppSettings.mockReturnValue({
+      settings: {
+        ...SETTINGS,
+        codexProfile: "cloud",
+      },
+      serverSettings: DEFAULT_SERVER_SETTINGS,
+    });
+    modelQueries.set("codex", {
+      data: {
+        models: [
+          { slug: "gpt-5.5", name: "GPT-5.5" },
+          { slug: "openrouter/custom-model", name: "Custom Routed Model" },
+        ],
+        source: "codex.app-server",
+        cached: false,
+      },
+      isFetching: false,
+      isLoading: false,
+      isPlaceholderData: false,
+    });
+
+    const catalog = readCatalogRenders({
+      selectedProvider: "codex",
+      discoveryEnabled: true,
+    }).at(-1);
+
+    expect(catalog?.modelOptionsByProvider.codex.map((model) => model.slug)).toEqual([
+      "openrouter/custom-model",
+    ]);
+  });
+
+  it("retains the native static fallback when an alternate Codex home resolves to OpenAI", () => {
+    mocks.useAppSettings.mockReturnValue({
+      settings: {
+        ...SETTINGS,
+        codexHomePath: "/tmp/native-codex-home",
+      },
+      serverSettings: DEFAULT_SERVER_SETTINGS,
+    });
+    const catalog = readCatalogRenders({
+      selectedProvider: "codex",
+      discoveryEnabled: true,
+    }).at(-1);
+
+    expect(catalog?.modelOptionsByProvider.codex.some((model) => model.slug === "gpt-5.5")).toBe(
+      true,
+    );
+    expect(
+      catalog?.modelOptionsByProvider.codex.some(
+        (model) => model.slug === "openrouter/custom-model",
+      ),
+    ).toBe(true);
   });
 });

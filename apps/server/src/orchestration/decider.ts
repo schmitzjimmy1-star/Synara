@@ -503,6 +503,21 @@ function resolveThreadWorkspaceMetadataPatch(
   };
 }
 
+function hasThreadWorkspaceMetadataPatch(
+  command: Extract<OrchestrationCommand, { type: "thread.meta.update" }>,
+): boolean {
+  return (
+    command.envMode !== undefined ||
+    command.branch !== undefined ||
+    command.worktreePath !== undefined ||
+    command.workingDirectory !== undefined ||
+    command.associatedWorktreePath !== undefined ||
+    command.associatedWorktreeBranch !== undefined ||
+    command.associatedWorktreeRef !== undefined ||
+    command.createBranchFlowCompleted !== undefined
+  );
+}
+
 function deriveConversationRollbackTarget(
   messages: OrchestrationReadModel["threads"][number]["messages"],
   messageId: string,
@@ -1304,14 +1319,28 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           candidate.deletedAt === null &&
           (candidate.sidechatSourceThreadId ?? null) === command.threadId,
       );
-      const revertingSidechat = sidechatThreads.find(threadHasCheckpointRevertInProgress);
-      if (revertingSidechat) {
+      const sidechatOwnedThreads = sidechatThreads.flatMap((sidechat) => [
+        sidechat,
+        ...collectLifecycleDescendants(readModel.threads, sidechat.id).filter(
+          (candidate) => candidate.deletedAt === null,
+        ),
+      ]);
+      const uniqueSidechatOwnedThreads = [
+        ...new Map(sidechatOwnedThreads.map((candidate) => [candidate.id, candidate])).values(),
+      ];
+      const revertingSidechatDescendant = uniqueSidechatOwnedThreads.find(
+        threadHasCheckpointRevertInProgress,
+      );
+      if (revertingSidechatDescendant) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
-          detail: checkpointRevertDeleteInProgressDetail(revertingSidechat.id),
+          detail: checkpointRevertDeleteInProgressDetail(revertingSidechatDescendant.id),
         });
       }
-      const events = [...sidechatThreads.map((candidate) => candidate.id), command.threadId].map(
+      const events = [
+        ...uniqueSidechatOwnedThreads.map((candidate) => candidate.id),
+        command.threadId,
+      ].map(
         (threadId): Omit<OrchestrationEvent, "sequence"> => ({
           ...withEventBase({
             aggregateKind: "thread",
@@ -1361,7 +1390,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.unarchive": {
-      yield* requireThreadArchived({
+      const thread = yield* requireThreadArchived({
         readModel,
         command,
         threadId: command.threadId,
@@ -1370,8 +1399,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       // Restoring a source brings back the Side Chat/subagent subtree archived
       // with it. The commanded thread goes last for command-receipt semantics.
       const lifecycleThreadIds = collectLifecycleDescendants(readModel.threads, command.threadId)
-        .filter((thread) => thread.deletedAt === null && (thread.archivedAt ?? null) !== null)
-        .map((thread) => thread.id);
+        .filter(
+          (candidate) =>
+            candidate.deletedAt === null &&
+            candidate.archivedAt !== null &&
+            candidate.archivedAt === thread.archivedAt,
+        )
+        .map((candidate) => candidate.id);
       return [...lifecycleThreadIds, command.threadId].map(
         (threadId): Omit<OrchestrationEvent, "sequence"> => ({
           ...withEventBase({
@@ -1396,13 +1430,21 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         threadId: command.threadId,
       });
       const project = readModel.projects.find((candidate) => candidate.id === thread.projectId);
+      const hasWorkspacePatch = hasThreadWorkspaceMetadataPatch(command);
+      if ((thread.sidechatSourceThreadId ?? null) !== null && hasWorkspacePatch) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Side Chat '${thread.id}' inherits its workspace from source thread '${thread.sidechatSourceThreadId}' and cannot change it independently.`,
+        });
+      }
       // Provider-native threads: see thread.create — the selection mirrors the
       // provider's own subagent, so the Auto-mode capability check doesn't apply.
       if (command.modelSelection !== undefined && thread.creationSource !== "provider_native") {
         yield* validateAutoRuntimeMode(command, command.modelSelection, thread.runtimeMode);
       }
       const occurredAt = nowIso();
-      return {
+      const workspacePatch = resolveThreadWorkspaceMetadataPatch(project?.kind, command, thread);
+      const sourceEvent: Omit<OrchestrationEvent, "sequence"> = {
         ...withEventBase({
           aggregateKind: "thread",
           aggregateId: command.threadId,
@@ -1416,7 +1458,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.modelSelection !== undefined
             ? { modelSelection: command.modelSelection }
             : {}),
-          ...resolveThreadWorkspaceMetadataPatch(project?.kind, command, thread),
+          ...workspacePatch,
           ...(command.isPinned !== undefined ? { isPinned: command.isPinned } : {}),
           ...(command.isSettled !== undefined
             ? { settledAt: command.isSettled ? occurredAt : null }
@@ -1444,6 +1486,31 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           updatedAt: occurredAt,
         },
       };
+      if (!hasWorkspacePatch) {
+        return sourceEvent;
+      }
+      const linkedSidechatEvents = readModel.threads
+        .filter(
+          (candidate) =>
+            candidate.deletedAt === null && candidate.sidechatSourceThreadId === thread.id,
+        )
+        .map(
+          (candidate): Omit<OrchestrationEvent, "sequence"> => ({
+            ...withEventBase({
+              aggregateKind: "thread",
+              aggregateId: candidate.id,
+              occurredAt,
+              commandId: command.commandId,
+            }),
+            type: "thread.meta-updated",
+            payload: {
+              threadId: candidate.id,
+              ...workspacePatch,
+              updatedAt: occurredAt,
+            },
+          }),
+        );
+      return linkedSidechatEvents.length > 0 ? [...linkedSidechatEvents, sourceEvent] : sourceEvent;
     }
 
     case "thread.pinned-message.add": {

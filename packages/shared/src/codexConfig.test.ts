@@ -12,6 +12,7 @@ import {
   parseCodexConfigMcpServerCount,
   parseCodexConfigProviderEnvKey,
   readActiveCodexProviderEnvKey,
+  resolveEffectiveCodexRoute,
 } from "./codexConfig";
 
 const tempDirs: string[] = [];
@@ -239,6 +240,114 @@ describe("parseCodexConfigActiveProviderEnvKey", () => {
 
   it("returns undefined for the default openai provider", () => {
     expect(parseCodexConfigActiveProviderEnvKey('model_provider = "openai"\n')).toBeUndefined();
+  });
+});
+
+describe("resolveEffectiveCodexRoute", () => {
+  it("validates an overridden openai provider as a custom route", () => {
+    const codexHome = makeTempCodexHome(
+      [
+        'model_provider = "openai"',
+        "[model_providers.openai]",
+        'base_url = "http://models.example.test/v1"',
+        'env_key = "CUSTOM_API_KEY"',
+      ].join("\n"),
+    );
+
+    expect(resolveEffectiveCodexRoute({ homePath: codexHome })).toMatchObject({
+      status: "invalid",
+      provider: "openai",
+      kind: "custom-incompatible",
+    });
+  });
+
+  it("layers a sidecar selection over base provider, MCP, and auth configuration", () => {
+    const codexHome = makeTempCodexHome(
+      [
+        "[mcp_servers.docs]",
+        'url = "https://example.test/mcp"',
+        "[model_providers.openrouter]",
+        'base_url = "https://openrouter.ai/api/v1"',
+        'wire_api = "responses"',
+        'env_key = "OPENROUTER_API_KEY"',
+      ].join("\n"),
+    );
+    writeFileSync(join(codexHome, "cloud.config.toml"), 'model_provider = "openrouter"\n');
+
+    expect(resolveEffectiveCodexRoute({ homePath: codexHome, profile: "cloud" })).toMatchObject({
+      status: "ready",
+      provider: "openrouter",
+      kind: "custom-responses",
+      baseUrl: "https://openrouter.ai/api/v1",
+      wireApi: "responses",
+      credentialSource: "env",
+      configuredMcpServerCount: 1,
+      profileConfigPresent: true,
+    });
+  });
+
+  it.each([
+    ["missing profile", undefined, "Profile 'gone' is missing its config file."],
+    [
+      "insecure endpoint",
+      [
+        'model_provider = "custom"',
+        "[model_providers.custom]",
+        'base_url = "http://models.example.test/v1"',
+        'env_key = "CUSTOM_API_KEY"',
+      ].join("\n"),
+      "safe HTTPS endpoint",
+    ],
+    [
+      "two auth authorities",
+      [
+        'model_provider = "custom"',
+        "[model_providers.custom]",
+        'base_url = "https://models.example.test/v1"',
+        'env_key = "CUSTOM_API_KEY"',
+        "[model_providers.custom.auth]",
+        'command = "security"',
+      ].join("\n"),
+      "exactly one credential source",
+    ],
+    [
+      "non-Responses wire API",
+      [
+        'model_provider = "custom"',
+        "[model_providers.custom]",
+        'base_url = "https://models.example.test/v1"',
+        'wire_api = "chat"',
+        'env_key = "CUSTOM_API_KEY"',
+      ].join("\n"),
+      "requires the Responses wire API",
+    ],
+  ])("fails closed for %s", (_label, profileContent, expectedDetail) => {
+    const codexHome = makeTempCodexHome();
+    if (profileContent !== undefined) {
+      writeFileSync(join(codexHome, "gone.config.toml"), profileContent);
+    }
+
+    const route = resolveEffectiveCodexRoute({ homePath: codexHome, profile: "gone" });
+    expect(route.status).toBe("invalid");
+    expect(route.detail).toContain(expectedDetail);
+  });
+
+  it("fingerprints exact route bytes without returning credentials", () => {
+    const codexHome = makeTempCodexHome(
+      [
+        'model_provider = "custom"',
+        "[model_providers.custom]",
+        'base_url = "https://models.example.test/v1"',
+        'env_key = "CUSTOM_API_KEY"',
+      ].join("\n"),
+    );
+    const first = resolveEffectiveCodexRoute({ homePath: codexHome });
+    writeFileSync(join(codexHome, "config.toml"), 'model_provider = "openai"\n');
+    const second = resolveEffectiveCodexRoute({ homePath: codexHome });
+
+    expect(first.fingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(second.fingerprint).not.toBe(first.fingerprint);
+    expect(JSON.stringify(first)).not.toContain("CUSTOM_API_KEY");
   });
 });
 

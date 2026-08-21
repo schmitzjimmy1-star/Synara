@@ -17,7 +17,12 @@ import {
   providerAgentsQueryOptions,
   providerModelsQueryOptions,
 } from "../lib/providerDiscoveryReactQuery";
-import { mergeDynamicModelOptions, type ProviderModelOption } from "../providerModelOptions";
+import { serverDiagnosticsQueryOptions } from "../lib/serverReactQuery";
+import {
+  formatProviderModelOptionName,
+  mergeDynamicModelOptions,
+  type ProviderModelOption,
+} from "../providerModelOptions";
 
 export interface ProviderModelCatalog {
   customModelsByProvider: ReturnType<typeof getCustomModelsByProvider>;
@@ -74,8 +79,43 @@ export function useProviderModelCatalog(input: {
       getAppModelOptions("codex", customModelsByProvider.codex, input.modelHintByProvider?.codex),
     [customModelsByProvider.codex, input.modelHintByProvider?.codex],
   );
+  const configuredCodexRouteCandidate = Boolean(
+    settings.codexHomePath.trim().length > 0 || settings.codexProfile.trim().length > 0,
+  );
+  const codexDiagnosticsQuery = useQuery(
+    serverDiagnosticsQueryOptions(discoverCodex && configuredCodexRouteCandidate),
+  );
+  const effectiveCodexRouteKind = codexDiagnosticsQuery.data?.codex.route.kind;
+  // A configured home/profile can still resolve to native OpenAI. Only the
+  // server can safely inspect the effective TOML; until it proves that route
+  // native, keep the candidate fail-closed to its explicit model allowlist.
+  const customCodexRouteConfigured =
+    configuredCodexRouteCandidate && effectiveCodexRouteKind !== "openai";
+  const codexRouteOptions = useMemo(
+    () =>
+      customModelsByProvider.codex.map((slug) => ({
+        provider: "codex" as const,
+        slug,
+        name: formatProviderModelOptionName({ provider: "codex", slug }),
+        isCustom: true,
+      })),
+    [customModelsByProvider.codex],
+  );
   const codexOptions = useMemo(() => {
     const dynamicModels = codexModelsQuery.data?.models ?? EMPTY_MODELS;
+    if (customCodexRouteConfigured) {
+      const configuredSlugs = new Set(customModelsByProvider.codex);
+      const configuredDynamicModels = dynamicModels.filter((model) =>
+        configuredSlugs.has(model.slug),
+      );
+      return configuredDynamicModels.length > 0
+        ? mergeDynamicModelOptions({
+            provider: "codex",
+            staticOptions: codexRouteOptions,
+            dynamicModels: configuredDynamicModels,
+          })
+        : codexRouteOptions;
+    }
     return dynamicModels.length > 0
       ? mergeDynamicModelOptions({
           provider: "codex",
@@ -83,7 +123,13 @@ export function useProviderModelCatalog(input: {
           dynamicModels,
         })
       : codexStaticOptions;
-  }, [codexModelsQuery.data?.models, codexStaticOptions]);
+  }, [
+    codexModelsQuery.data?.models,
+    codexRouteOptions,
+    codexStaticOptions,
+    customCodexRouteConfigured,
+    customModelsByProvider.codex,
+  ]);
 
   const modelOptionsByProvider = useMemo<Record<ProviderKind, typeof EMPTY_OPTIONS>>(
     () => ({

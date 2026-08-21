@@ -35,6 +35,7 @@ import {
 } from "@synara/contracts";
 import { prewarmChatGptVoiceTranscriptionConnection } from "@synara/shared/chatGptVoiceTranscription";
 import { resolveCodexBinary } from "@synara/shared/codexBinary";
+import { resolveEffectiveCodexRoute } from "@synara/shared/codexConfig";
 import { getModelSelectionBooleanOptionValue, normalizeModelSlug } from "@synara/shared/model";
 import { decodeSubagentReceiverThreadIds } from "@synara/shared/subagents";
 import { prepareWindowsSafeProcess } from "@synara/shared/windowsProcess";
@@ -49,7 +50,7 @@ import {
 } from "./provider/codexCliVersion";
 import { AGENT_GATEWAY_TURN_AUTHORITY_RETIRED } from "./agentGateway/sessionLease.ts";
 import { isNonFatalCodexErrorMessage } from "./codexErrorClassification.ts";
-import { buildCodexProcessEnv, resolveCodexRouteIdentity } from "./codexProcessEnv.ts";
+import { buildCodexProcessEnv } from "./codexProcessEnv.ts";
 import { assertCodexWorkingDirectoryExists } from "./codexWorkingDirectory.ts";
 import { executableIdentity, resolveExecutable } from "./executableLookup.ts";
 import {
@@ -697,6 +698,19 @@ function spawnCodexAppServer(input: {
   });
 }
 
+function requireCompatibleCodexRoute(input: {
+  readonly homePath?: string;
+  readonly profile?: string;
+}) {
+  const route = resolveEffectiveCodexRoute(input);
+  if (route.status === "invalid") {
+    throw new Error(
+      `Codex route is invalid: ${route.detail ?? "the selected profile cannot be used"}`,
+    );
+  }
+  return route;
+}
+
 export function normalizeCodexModelSlug(
   model: string | undefined | null,
   preferredId?: string,
@@ -970,6 +984,13 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
 
       const resolvedCwd = resolveScratchWorkspaceCwd(threadId, input.cwd);
       const codexOptions = readCodexProviderOptions(input);
+      const configuredCodexBinaryPath = codexOptions.binaryPath ?? "codex";
+      const codexHomePath = codexOptions.homePath;
+      const codexProfile = codexOptions.profile;
+      const codexRoute = requireCompatibleCodexRoute({
+        ...(codexHomePath ? { homePath: codexHomePath } : {}),
+        ...(codexProfile ? { profile: codexProfile } : {}),
+      });
 
       const session: ProviderSession = {
         provider: "codex",
@@ -977,18 +998,20 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         runtimeMode: input.runtimeMode,
         model: normalizeCodexModelSlug(input.model),
         cwd: resolvedCwd,
-        ...(codexOptions.routeFingerprint
-          ? { providerConfigFingerprint: codexOptions.routeFingerprint }
-          : {}),
+        providerConfigFingerprint: codexRoute.fingerprint,
         threadId,
         createdAt: now,
         updatedAt: now,
       };
 
-      const configuredCodexBinaryPath = codexOptions.binaryPath ?? "codex";
-      const codexHomePath = codexOptions.homePath;
-      const codexProfile = codexOptions.profile;
       const processEnv = await this.buildSessionProcessEnv(codexHomePath, codexProfile);
+      const launchRoute = requireCompatibleCodexRoute({
+        ...(codexHomePath ? { homePath: codexHomePath } : {}),
+        ...(codexProfile ? { profile: codexProfile } : {}),
+      });
+      if (launchRoute.fingerprint !== codexRoute.fingerprint) {
+        throw new Error("Codex route changed while the session was starting. Retry the turn.");
+      }
       const codexBinaryPath = resolveCodexBinary({
         configuredPath: configuredCodexBinaryPath,
         env: processEnv,
@@ -1747,7 +1770,22 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       const configuredCodexBinaryPath = codexOptions.binaryPath ?? "codex";
       const codexHomePath = codexOptions.homePath;
       const codexProfile = codexOptions.profile;
+      const codexRoute = requireCompatibleCodexRoute({
+        ...(codexHomePath ? { homePath: codexHomePath } : {}),
+        ...(codexProfile ? { profile: codexProfile } : {}),
+      });
+      const routedSession: ProviderSession = {
+        ...session,
+        providerConfigFingerprint: codexRoute.fingerprint,
+      };
       const processEnv = await this.buildSessionProcessEnv(codexHomePath, codexProfile);
+      const launchRoute = requireCompatibleCodexRoute({
+        ...(codexHomePath ? { homePath: codexHomePath } : {}),
+        ...(codexProfile ? { profile: codexProfile } : {}),
+      });
+      if (launchRoute.fingerprint !== codexRoute.fingerprint) {
+        throw new Error("Codex route changed while the session was starting. Retry the fork.");
+      }
       const codexBinaryPath = resolveCodexBinary({
         configuredPath: configuredCodexBinaryPath,
         env: processEnv,
@@ -1767,7 +1805,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       });
 
       context = {
-        session,
+        session: routedSession,
         account: {
           type: "unknown",
           planType: null,
@@ -2387,7 +2425,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
   ): Promise<ProviderListModelsResult> {
     const input =
       typeof inputOrThreadId === "string" ? { threadId: inputOrThreadId } : inputOrThreadId;
-    const routeIdentity = resolveCodexRouteIdentity({
+    const routeIdentity = requireCompatibleCodexRoute({
       ...(input.homePath?.trim() ? { homePath: input.homePath.trim() } : {}),
       ...(input.profile?.trim() ? { profile: input.profile.trim() } : {}),
     });
@@ -2681,7 +2719,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     profile?: string,
   ): Promise<CodexSessionContext> {
     const normalizedCwd = cwd.trim() || process.cwd();
-    const routeIdentity = resolveCodexRouteIdentity({
+    const routeIdentity = requireCompatibleCodexRoute({
       ...(homePath?.trim() ? { homePath: homePath.trim() } : {}),
       ...(profile?.trim() ? { profile: profile.trim() } : {}),
     });
@@ -2740,10 +2778,21 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     }
 
     const now = new Date().toISOString();
+    const route = requireCompatibleCodexRoute({
+      ...(homePath?.trim() ? { homePath: homePath.trim() } : {}),
+      ...(profile?.trim() ? { profile: profile.trim() } : {}),
+    });
     const processEnv = await buildCodexProcessEnv({
       ...(homePath?.trim() ? { homePath: homePath.trim() } : {}),
       ...(profile?.trim() ? { profile: profile.trim() } : {}),
     });
+    const launchRoute = requireCompatibleCodexRoute({
+      ...(homePath?.trim() ? { homePath: homePath.trim() } : {}),
+      ...(profile?.trim() ? { profile: profile.trim() } : {}),
+    });
+    if (launchRoute.fingerprint !== route.fingerprint) {
+      throw new Error("Codex route changed while model discovery was starting. Retry discovery.");
+    }
     const codexBinaryPath = resolveCodexBinary({
       configuredPath: binaryPath?.trim() || "codex",
       env: processEnv,
@@ -2764,6 +2813,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         status: "connecting",
         runtimeMode: "full-access",
         model: CODEX_DEFAULT_MODEL,
+        providerConfigFingerprint: route.fingerprint,
         cwd: normalizedCwd,
         threadId: ThreadId.makeUnsafe(`__codex_discovery__:${normalizedCwd}`),
         createdAt: now,
@@ -4040,7 +4090,6 @@ function readCodexProviderOptions(input: CodexAppServerStartSessionInput): {
   readonly binaryPath?: string;
   readonly homePath?: string;
   readonly profile?: string;
-  readonly routeFingerprint?: string;
 } {
   const options = input.providerOptions?.codex;
   if (!options) {
@@ -4050,7 +4099,6 @@ function readCodexProviderOptions(input: CodexAppServerStartSessionInput): {
     ...(options.binaryPath ? { binaryPath: options.binaryPath } : {}),
     ...(options.homePath ? { homePath: options.homePath } : {}),
     ...(options.profile ? { profile: options.profile } : {}),
-    ...(options.routeFingerprint ? { routeFingerprint: options.routeFingerprint } : {}),
   };
 }
 

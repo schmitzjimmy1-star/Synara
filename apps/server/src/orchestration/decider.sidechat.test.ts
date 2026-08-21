@@ -1,6 +1,7 @@
 import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
+  EventId,
   ProjectId,
   ThreadId,
   type OrchestrationEvent,
@@ -29,6 +30,7 @@ function makeThread(input: {
   sidechatSourceThreadId?: ThreadId;
   archivedAt?: string;
   deletedAt?: string;
+  activities?: ReadThread["activities"];
 }): ReadThread {
   return {
     id: input.id,
@@ -51,7 +53,7 @@ function makeThread(input: {
     handoff: null,
     messages: [],
     session: null,
-    activities: [],
+    activities: input.activities ?? [],
     proposedPlans: [],
     checkpoints: [],
     deletedAt: input.deletedAt ?? null,
@@ -175,6 +177,69 @@ describe("decider Side Chat integrity", () => {
       createBranchFlowCompleted: true,
     });
   });
+
+  it("rejects direct Side Chat workspace changes", async () => {
+    await expect(
+      Effect.runPromise(
+        decideOrchestrationCommand({
+          command: {
+            type: "thread.meta.update",
+            commandId: CommandId.makeUnsafe("cmd-move-sidechat"),
+            threadId: SIDECHAT_THREAD_ID,
+            branch: "feature/wrong",
+          },
+          readModel: makeReadModel([
+            makeThread({ id: SOURCE_THREAD_ID }),
+            makeThread({
+              id: SIDECHAT_THREAD_ID,
+              sidechatSourceThreadId: SOURCE_THREAD_ID,
+            }),
+          ]),
+        }),
+      ),
+    ).rejects.toThrow("inherits its workspace from source thread");
+  });
+
+  it("cascades source workspace changes to direct Side Chats", async () => {
+    const result = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: {
+          type: "thread.meta.update",
+          commandId: CommandId.makeUnsafe("cmd-move-source"),
+          threadId: SOURCE_THREAD_ID,
+          envMode: "local",
+          branch: "main",
+          worktreePath: null,
+          workingDirectory: "/tmp/project",
+          associatedWorktreePath: null,
+          associatedWorktreeBranch: null,
+          associatedWorktreeRef: null,
+          createBranchFlowCompleted: true,
+        },
+        readModel: makeReadModel([
+          makeThread({ id: SOURCE_THREAD_ID }),
+          makeThread({
+            id: SIDECHAT_THREAD_ID,
+            sidechatSourceThreadId: SOURCE_THREAD_ID,
+          }),
+          makeThread({ id: OTHER_THREAD_ID }),
+        ]),
+      }),
+    );
+    const events = result as Omit<OrchestrationEvent, "sequence">[];
+
+    expect(eventThreadIds(result)).toEqual([SIDECHAT_THREAD_ID, SOURCE_THREAD_ID]);
+    expect(events[0]).toMatchObject({
+      type: "thread.meta-updated",
+      payload: {
+        threadId: SIDECHAT_THREAD_ID,
+        envMode: "local",
+        branch: "main",
+        worktreePath: null,
+        workingDirectory: "/tmp/project",
+      },
+    });
+  });
 });
 
 describe("decider Side Chat lifecycle cascade", () => {
@@ -198,7 +263,7 @@ describe("decider Side Chat lifecycle cascade", () => {
     makeThread({ id: OTHER_THREAD_ID, ...(archivedAt ? { archivedAt } : {}) }),
   ];
 
-  it("deletes Side Chats before the source without changing subagent deletion behavior", async () => {
+  it("deletes the Side Chat subtree while preserving ordinary source subagents", async () => {
     const result = await Effect.runPromise(
       decideOrchestrationCommand({
         command: {
@@ -210,7 +275,42 @@ describe("decider Side Chat lifecycle cascade", () => {
       }),
     );
 
-    expect(eventThreadIds(result)).toEqual([SIDECHAT_THREAD_ID, SOURCE_THREAD_ID]);
+    expect(eventThreadIds(result)).toEqual([
+      SIDECHAT_THREAD_ID,
+      SIDECHAT_SUBAGENT_ID,
+      SOURCE_THREAD_ID,
+    ]);
+  });
+
+  it("blocks source deletion while a Side Chat descendant is reverting a checkpoint", async () => {
+    const revertingActivity: ReadThread["activities"][number] = {
+      id: EventId.makeUnsafe("event-sidechat-revert"),
+      kind: "checkpoint.revert.started",
+      tone: "info",
+      summary: "Checkpoint revert started",
+      payload: {},
+      turnId: null,
+      createdAt: NOW,
+    };
+
+    await expect(
+      Effect.runPromise(
+        decideOrchestrationCommand({
+          command: {
+            type: "thread.delete",
+            commandId: CommandId.makeUnsafe("cmd-delete-reverting-source"),
+            threadId: SOURCE_THREAD_ID,
+          },
+          readModel: makeReadModel(
+            linkedThreads().map((thread) =>
+              thread.id === SIDECHAT_SUBAGENT_ID
+                ? { ...thread, activities: [revertingActivity] }
+                : thread,
+            ),
+          ),
+        }),
+      ),
+    ).rejects.toThrow(`Thread '${SIDECHAT_SUBAGENT_ID}' has a checkpoint revert in progress`);
   });
 
   it("archives Side Chats and both subagent branches before the source receipt", async () => {
@@ -251,5 +351,33 @@ describe("decider Side Chat lifecycle cascade", () => {
       SIDECHAT_SUBAGENT_ID,
       SOURCE_THREAD_ID,
     ]);
+  });
+
+  it("does not unarchive descendants that were archived independently", async () => {
+    const independentlyArchivedAt = "2026-08-20T12:00:00.000Z";
+    const result = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: {
+          type: "thread.unarchive",
+          commandId: CommandId.makeUnsafe("cmd-unarchive-source-selectively"),
+          threadId: SOURCE_THREAD_ID,
+        },
+        readModel: makeReadModel([
+          makeThread({ id: SOURCE_THREAD_ID, archivedAt: NOW }),
+          makeThread({
+            id: SIDECHAT_THREAD_ID,
+            sidechatSourceThreadId: SOURCE_THREAD_ID,
+            archivedAt: independentlyArchivedAt,
+          }),
+          makeThread({
+            id: SOURCE_SUBAGENT_ID,
+            parentThreadId: SOURCE_THREAD_ID,
+            archivedAt: NOW,
+          }),
+        ]),
+      }),
+    );
+
+    expect(eventThreadIds(result)).toEqual([SOURCE_SUBAGENT_ID, SOURCE_THREAD_ID]);
   });
 });
