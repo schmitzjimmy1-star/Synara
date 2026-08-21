@@ -9,6 +9,7 @@ import {
   buildCodexProcessEnv,
   linkOrCopyCodexOverlayEntry,
   prioritizeCodexOverlayEntries,
+  resolveCodexRouteIdentity,
 } from "./codexProcessEnv";
 import { isProviderCredentialKey } from "./providerChildEnvironment.ts";
 
@@ -41,6 +42,38 @@ describe("applyCodexProfileLayer", () => {
     expect(layered).toContain('[plugins."computer-history@openai-bundled"]');
     expect(layered).toContain("[model_providers.openrouter]");
     expect(layered).not.toContain('model = "gpt-5.5"');
+  });
+});
+
+describe("resolveCodexRouteIdentity", () => {
+  it("changes when the effective profile changes without exposing config bytes", async () => {
+    const sourceHome = mkdtempSync(path.join(os.tmpdir(), "synara-codex-route-"));
+    const profilePath = path.join(sourceHome, "custom.config.toml");
+    writeFileSync(path.join(sourceHome, "config.toml"), 'model_provider = "openai"\n', "utf8");
+    writeFileSync(profilePath, 'model_provider = "acme"\n', "utf8");
+    try {
+      const first = await resolveCodexRouteIdentity({ homePath: sourceHome, profile: "custom" });
+      writeFileSync(profilePath, 'model_provider = "other"\n', "utf8");
+      const second = await resolveCodexRouteIdentity({ homePath: sourceHome, profile: "custom" });
+
+      expect(first.fingerprint).toMatch(/^[a-f0-9]{64}$/);
+      expect(second.fingerprint).not.toBe(first.fingerprint);
+      expect(JSON.stringify(second)).not.toContain("model_provider");
+    } finally {
+      rmSync(sourceHome, { recursive: true, force: true });
+    }
+  });
+
+  it("is stable for unchanged source and profile bytes", async () => {
+    const sourceHome = mkdtempSync(path.join(os.tmpdir(), "synara-codex-route-"));
+    writeFileSync(path.join(sourceHome, "config.toml"), 'model_provider = "openai"\n', "utf8");
+    try {
+      const first = await resolveCodexRouteIdentity({ homePath: sourceHome });
+      const second = await resolveCodexRouteIdentity({ homePath: sourceHome });
+      expect(second).toEqual(first);
+    } finally {
+      rmSync(sourceHome, { recursive: true, force: true });
+    }
   });
 });
 

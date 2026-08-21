@@ -50,7 +50,7 @@ import {
 } from "./provider/codexCliVersion";
 import { AGENT_GATEWAY_TURN_AUTHORITY_RETIRED } from "./agentGateway/sessionLease.ts";
 import { isNonFatalCodexErrorMessage } from "./codexErrorClassification.ts";
-import { buildCodexProcessEnv } from "./codexProcessEnv.ts";
+import { buildCodexProcessEnv, resolveCodexRouteIdentity } from "./codexProcessEnv.ts";
 import { assertCodexWorkingDirectoryExists } from "./codexWorkingDirectory.ts";
 import { executableIdentity, resolveExecutable } from "./executableLookup.ts";
 import {
@@ -974,6 +974,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       }
 
       const resolvedCwd = resolveScratchWorkspaceCwd(threadId, input.cwd);
+      const codexOptions = readCodexProviderOptions(input);
 
       const session: ProviderSession = {
         provider: "codex",
@@ -981,12 +982,14 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         runtimeMode: input.runtimeMode,
         model: normalizeCodexModelSlug(input.model),
         cwd: resolvedCwd,
+        ...(codexOptions.routeFingerprint
+          ? { providerConfigFingerprint: codexOptions.routeFingerprint }
+          : {}),
         threadId,
         createdAt: now,
         updatedAt: now,
       };
 
-      const codexOptions = readCodexProviderOptions(input);
       const configuredCodexBinaryPath = codexOptions.binaryPath ?? "codex";
       const codexHomePath = codexOptions.homePath;
       const codexProfile = codexOptions.profile;
@@ -2397,12 +2400,17 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
   ): Promise<ProviderListModelsResult> {
     const input =
       typeof inputOrThreadId === "string" ? { threadId: inputOrThreadId } : inputOrThreadId;
+    const routeIdentity = resolveCodexRouteIdentity({
+      ...(input.homePath?.trim() ? { homePath: input.homePath.trim() } : {}),
+      ...(input.profile?.trim() ? { profile: input.profile.trim() } : {}),
+    });
     const cacheKey = JSON.stringify({
       threadId: input.threadId?.trim() || null,
       cwd: input.cwd?.trim() || null,
       binaryPath: input.binaryPath?.trim() || "codex",
       homePath: input.homePath?.trim() || null,
       profile: input.profile?.trim() || null,
+      routeFingerprint: routeIdentity.fingerprint,
     });
     const cached = getRecentCacheEntry(this.modelCache, cacheKey);
     if (cached && Date.now() - cached.cachedAt <= CODEX_MODEL_DISCOVERY_CACHE_TTL_MS) {
@@ -2686,6 +2694,10 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     profile?: string,
   ): Promise<CodexSessionContext> {
     const normalizedCwd = cwd.trim() || process.cwd();
+    const routeIdentity = resolveCodexRouteIdentity({
+      ...(homePath?.trim() ? { homePath: homePath.trim() } : {}),
+      ...(profile?.trim() ? { profile: profile.trim() } : {}),
+    });
     const discoveryKey =
       binaryPath?.trim() || homePath?.trim() || profile?.trim()
         ? JSON.stringify({
@@ -2693,6 +2705,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
             binaryPath: binaryPath?.trim() || "codex",
             homePath: homePath?.trim() || null,
             profile: profile?.trim() || null,
+            routeFingerprint: routeIdentity.fingerprint,
           })
         : normalizedCwd;
     const startup = this.discoverySessionStartups.get(discoveryKey);
@@ -4040,6 +4053,7 @@ function readCodexProviderOptions(input: CodexAppServerStartSessionInput): {
   readonly binaryPath?: string;
   readonly homePath?: string;
   readonly profile?: string;
+  readonly routeFingerprint?: string;
 } {
   const options = input.providerOptions?.codex;
   if (!options) {
@@ -4049,6 +4063,7 @@ function readCodexProviderOptions(input: CodexAppServerStartSessionInput): {
     ...(options.binaryPath ? { binaryPath: options.binaryPath } : {}),
     ...(options.homePath ? { homePath: options.homePath } : {}),
     ...(options.profile ? { profile: options.profile } : {}),
+    ...(options.routeFingerprint ? { routeFingerprint: options.routeFingerprint } : {}),
   };
 }
 

@@ -161,6 +161,7 @@ export const CodexProviderStartOptions = Schema.Struct({
   binaryPath: Schema.optional(TrimmedNonEmptyString),
   homePath: Schema.optional(TrimmedNonEmptyString),
   profile: Schema.optional(TrimmedNonEmptyString),
+  routeFingerprint: Schema.optional(TrimmedNonEmptyString),
 });
 
 export const ClaudeProviderStartOptions = Schema.Struct({

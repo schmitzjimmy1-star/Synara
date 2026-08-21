@@ -5,7 +5,8 @@
 // Depends on: Codex home path helpers, shared Codex config parsing, login-shell env reader.
 
 import * as fs from "node:fs/promises";
-import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import { parse as parseToml, stringify as stringifyToml, type TomlTable } from "smol-toml";
 
@@ -53,6 +54,49 @@ export function applyCodexProfileLayer(baseConfig: string, profileConfig: string
   const base = baseConfig.trim() ? parseToml(baseConfig) : {};
   const profile = profileConfig.trim() ? parseToml(profileConfig) : {};
   return stringifyToml(mergeTomlTables(base, profile)).trimEnd();
+}
+
+export interface CodexRouteIdentity {
+  readonly fingerprint: string;
+  readonly sourceHomePath: string;
+  readonly profile: string | null;
+}
+
+/**
+ * Creates a non-secret identity for the exact Codex configuration Synara will
+ * layer for a child process. Raw configuration bytes never leave the server.
+ */
+export function resolveCodexRouteIdentity(input: {
+  readonly env?: NodeJS.ProcessEnv;
+  readonly homePath?: string;
+  readonly profile?: string;
+}): CodexRouteIdentity {
+  const env = input.env ?? process.env;
+  const sourceHomePath = path.resolve(resolveBaseCodexHomePath(env, input.homePath));
+  const profile = input.profile?.trim() || null;
+  const readConfigOrEmpty = (filePath: string): string => {
+    try {
+      return readFileSync(filePath, "utf8");
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code === "ENOENT") return "";
+      throw cause;
+    }
+  };
+  const sourceConfig = readConfigOrEmpty(path.join(sourceHomePath, "config.toml"));
+  const profileConfig = profile
+    ? readConfigOrEmpty(path.join(sourceHomePath, `${profile}.config.toml`))
+    : "";
+  const fingerprint = createHash("sha256")
+    .update("synara-codex-route-v1\0")
+    .update(sourceHomePath)
+    .update("\0")
+    .update(profile ?? "")
+    .update("\0")
+    .update(sourceConfig)
+    .update("\0")
+    .update(profileConfig)
+    .digest("hex");
+  return { fingerprint, sourceHomePath, profile };
 }
 
 interface CodexOverlayEntryLinker {

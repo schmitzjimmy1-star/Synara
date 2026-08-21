@@ -2023,6 +2023,37 @@ describe("steerTurn", () => {
 });
 
 describe("CodexAppServerManager discovery", () => {
+  it("invalidates the model cache when a profile changes in place", async () => {
+    const homePath = mkdtempSync(path.join(os.tmpdir(), "synara-model-route-"));
+    const profilePath = path.join(homePath, "custom.config.toml");
+    writeFileSync(path.join(homePath, "config.toml"), 'model_provider = "openai"\n', "utf8");
+    writeFileSync(profilePath, 'model_provider = "acme"\n', "utf8");
+    const manager = new CodexAppServerManager();
+    const context = { session: { status: "ready" } };
+    vi.spyOn(
+      manager as unknown as { resolveContextForDiscovery: () => unknown },
+      "resolveContextForDiscovery",
+    ).mockReturnValue(context);
+    const sendRequest = vi
+      .spyOn(
+        manager as unknown as { sendRequest: (...args: unknown[]) => Promise<unknown> },
+        "sendRequest",
+      )
+      .mockResolvedValue({ result: { items: [] } });
+
+    try {
+      await manager.listModels({ homePath, profile: "custom" });
+      await manager.listModels({ homePath, profile: "custom" });
+      expect(sendRequest).toHaveBeenCalledTimes(1);
+
+      writeFileSync(profilePath, 'model_provider = "other"\n', "utf8");
+      await manager.listModels({ homePath, profile: "custom" });
+      expect(sendRequest).toHaveBeenCalledTimes(2);
+    } finally {
+      rmSync(homePath, { recursive: true, force: true });
+    }
+  });
+
   it("wires model discovery through model/list", async () => {
     const manager = new CodexAppServerManager();
     const context = {

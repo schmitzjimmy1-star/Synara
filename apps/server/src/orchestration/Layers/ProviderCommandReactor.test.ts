@@ -238,6 +238,19 @@ describe("ProviderCommandReactor", () => {
         typeof input === "object" && input !== null && "resumeCursor" in input
           ? input.resumeCursor
           : undefined;
+      const providerConfigFingerprint =
+        typeof input === "object" &&
+        input !== null &&
+        "providerOptions" in input &&
+        typeof input.providerOptions === "object" &&
+        input.providerOptions !== null &&
+        "codex" in input.providerOptions &&
+        typeof input.providerOptions.codex === "object" &&
+        input.providerOptions.codex !== null &&
+        "routeFingerprint" in input.providerOptions.codex &&
+        typeof input.providerOptions.codex.routeFingerprint === "string"
+          ? input.providerOptions.codex.routeFingerprint
+          : undefined;
       const threadId =
         typeof input === "object" &&
         input !== null &&
@@ -258,6 +271,7 @@ describe("ProviderCommandReactor", () => {
         ...(sessionModelSelection.model !== undefined
           ? { model: sessionModelSelection.model }
           : {}),
+        ...(providerConfigFingerprint ? { providerConfigFingerprint } : {}),
         threadId,
         resumeCursor: resumeCursor ?? { opaque: `resume-${sessionIndex}` },
         createdAt: now,
@@ -548,6 +562,7 @@ describe("ProviderCommandReactor", () => {
       Effect.runPromise(PubSub.publish(runtimeEventPubSub, event).pipe(Effect.asVoid));
 
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
+    const serverSettings = await runtime.runPromise(Effect.service(ServerSettingsService));
     // Fault injection for command admission. The reactor resolves
     // `dispatch` off the shared engine service on every call, so swapping the
     // property here is observed by the reactor without rebuilding the layer.
@@ -628,6 +643,7 @@ describe("ProviderCommandReactor", () => {
 
     return {
       engine,
+      serverSettings,
       reactor,
       startSession,
       listSessions,
@@ -7049,6 +7065,75 @@ describe("ProviderCommandReactor", () => {
     await waitFor(() => harness.sendTurn.mock.calls.length === 1);
     expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({ modelSelection });
     expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({ modelSelection });
+  });
+
+  it("restarts without the old resume cursor when the Codex route changes", async () => {
+    const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), "synara-reactor-route-"));
+    createdBaseDirs.add(codexHome);
+    fs.writeFileSync(path.join(codexHome, "route-a.config.toml"), 'model_provider = "a"\n');
+    fs.writeFileSync(path.join(codexHome, "route-b.config.toml"), 'model_provider = "b"\n');
+    const harness = await createHarness({
+      codexProviderSettings: { homePath: codexHome, profile: "route-a" },
+    });
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-route-a-turn"),
+        threadId,
+        message: {
+          messageId: asMessageId("user-message-route-a"),
+          role: "user",
+          text: "first route",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+    await waitFor(() => harness.startSession.mock.calls.length === 1);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    await harness.emitRuntimeEvent({
+      type: "turn.completed",
+      eventId: asEventId("evt-route-a-completed"),
+      provider: "codex",
+      threadId,
+      createdAt: new Date().toISOString(),
+      turnId: asTurnId("turn-1"),
+      payload: { state: "completed" },
+      providerRefs: {},
+    } as ProviderRuntimeEvent);
+    await Effect.runPromise(
+      harness.serverSettings.updateSettings({
+        providers: { codex: { profile: "route-b" } },
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-route-b-turn"),
+        threadId,
+        message: {
+          messageId: asMessageId("user-message-route-b"),
+          role: "user",
+          text: "second route",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: new Date().toISOString(),
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 2);
+    expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
+      providerOptions: { codex: { homePath: codexHome, profile: "route-b" } },
+    });
+    expect(harness.startSession.mock.calls[1]?.[1]).not.toHaveProperty("resumeCursor");
   });
 
   it("forwards codex model options through session start and turn send", async () => {
