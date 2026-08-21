@@ -20,6 +20,7 @@ export const serverQueryKeys = {
   settings: () => ["server", "settings"] as const,
   worktrees: () => ["server", "worktrees"] as const,
   localServers: () => ["server", "localServers"] as const,
+  diagnostics: () => ["server", "diagnostics"] as const,
   providerUsage: (provider: ProviderKind | null | undefined, homePath?: string | null) =>
     ["server", "providerUsage", provider ?? null, homePath ?? null] as const,
   allProviderUsage: () => ["server", "allProviderUsage"] as const,
@@ -179,6 +180,19 @@ export function serverSettingsQueryOptions() {
       return api.server.getSettings();
     },
     staleTime: Infinity,
+  });
+}
+
+export function serverDiagnosticsQueryOptions(enabled = true) {
+  return queryOptions({
+    queryKey: serverQueryKeys.diagnostics(),
+    queryFn: async () => {
+      const api = ensureNativeApi();
+      return api.server.getDiagnostics();
+    },
+    enabled,
+    staleTime: 5_000,
+    refetchOnReconnect: true,
   });
 }
 

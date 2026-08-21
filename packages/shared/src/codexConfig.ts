@@ -51,6 +51,16 @@ export function parseCodexConfigProviderBaseUrl(
   return typeof baseUrl === "string" && baseUrl.trim() ? baseUrl.trim() : undefined;
 }
 
+/**
+ * Counts configured MCP servers without exposing their names, commands, arguments,
+ * or environment. This is configuration evidence only; it does not claim that a
+ * server successfully started in a particular Codex session.
+ */
+export function parseCodexConfigMcpServerCount(content: string): number {
+  const servers = parseCodexConfig(content)?.mcp_servers;
+  return isTomlTable(servers) ? Object.keys(servers).length : 0;
+}
+
 export function isOpenRouterCodexConfig(content: string): boolean {
   const baseUrl = parseCodexConfigProviderBaseUrl(content, "openrouter")?.replace(/\/+$/, "");
   return (

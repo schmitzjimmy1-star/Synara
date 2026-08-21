@@ -68,6 +68,7 @@ import { toastManager } from "../ui/toast";
 import { ProviderIcon } from "../ProviderIcon";
 import { DebouncedSettingTextInput } from "./DebouncedSettingTextInput";
 import { SettingResetButton, useSettingsRestoreSignal } from "./SettingControls";
+import { CodexRuntimeDiagnosticsSection } from "./CodexRuntimeDiagnosticsSection";
 import { SettingsListRow, SettingsRow, SettingsSection } from "./SettingsPanelPrimitives";
 
 type ProviderInstallTextKey = "codexBinaryPath" | "codexHomePath" | "codexProfile";
@@ -864,6 +865,8 @@ export function ProvidersSettingsPanel({
           </SettingsRow>
         </SettingsSection>
       </div>
+
+      <CodexRuntimeDiagnosticsSection active={active} />
     </div>
   );
 }
