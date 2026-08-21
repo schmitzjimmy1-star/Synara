@@ -13,7 +13,8 @@ import {
 } from "./dockPaneActivation";
 
 describe("dockPaneActivation", () => {
-  it("treats browser, sidechat, and terminal panes as deferred runtime panes", () => {
+  it("treats agent browser, browser, sidechat, and terminal panes as deferred runtime panes", () => {
+    expect(isDeferredRuntimePaneKind("agentBrowser")).toBe(true);
     expect(isDeferredRuntimePaneKind("browser")).toBe(true);
     expect(isDeferredRuntimePaneKind("sidechat")).toBe(true);
     expect(isDeferredRuntimePaneKind("terminal")).toBe(true);

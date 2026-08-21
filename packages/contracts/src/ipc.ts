@@ -387,6 +387,120 @@ export interface BrowserCaptureScreenshotResult {
   bytes: Uint8Array;
 }
 
+export type AgentBrowserStatus =
+  | "unavailable"
+  | "idle"
+  | "starting"
+  | "running"
+  | "stopping"
+  | "error";
+
+export interface AgentBrowserTabState {
+  id: string;
+  targetId: string | null;
+  title: string;
+  url: string;
+  active: boolean;
+}
+
+export interface ThreadAgentBrowserState {
+  threadId: ThreadId;
+  status: AgentBrowserStatus;
+  available: boolean;
+  sessionName: string;
+  streamConnected: boolean;
+  url: string;
+  title: string;
+  tabs: AgentBrowserTabState[];
+  activeTabId: string | null;
+  viewportWidth: number;
+  viewportHeight: number;
+  lastError: string | null;
+}
+
+export interface AgentBrowserStartInput {
+  threadId: ThreadId;
+  initialUrl?: string;
+  viewportWidth?: number;
+  viewportHeight?: number;
+}
+
+export interface AgentBrowserThreadInput {
+  threadId: ThreadId;
+}
+
+export interface AgentBrowserViewportInput extends AgentBrowserThreadInput {
+  width: number;
+  height: number;
+  deviceScaleFactor?: number;
+}
+
+export interface AgentBrowserNavigateInput extends AgentBrowserThreadInput {
+  url: string;
+}
+
+export interface AgentBrowserTabInput extends AgentBrowserThreadInput {
+  tabId?: string;
+  initialUrl?: string;
+}
+
+export type AgentBrowserInputEvent =
+  | {
+      type: "mouse";
+      eventType: "mouseMoved" | "mousePressed" | "mouseReleased";
+      x: number;
+      y: number;
+      button?: "left" | "middle" | "right";
+      clickCount?: number;
+    }
+  | {
+      type: "keyboard";
+      eventType: "keyDown" | "keyUp";
+      key: string;
+      text?: string;
+    };
+
+export interface AgentBrowserSendInput {
+  threadId: ThreadId;
+  event: AgentBrowserInputEvent;
+}
+
+export interface AgentBrowserAckFrameInput {
+  threadId: ThreadId;
+  seq: number;
+}
+
+export type AgentBrowserEvent =
+  | { type: "state"; state: ThreadAgentBrowserState }
+  | {
+      type: "frame";
+      threadId: ThreadId;
+      seq: number;
+      data: string;
+      mimeType: "image/jpeg";
+      width: number;
+      height: number;
+      timestamp: number;
+    };
+
+interface AgentBrowserControlMethods {
+  getState: (input: AgentBrowserThreadInput) => Promise<ThreadAgentBrowserState>;
+  start: (input: AgentBrowserStartInput) => Promise<ThreadAgentBrowserState>;
+  stop: (input: AgentBrowserThreadInput) => Promise<ThreadAgentBrowserState>;
+  suspendPreview: (input: AgentBrowserThreadInput) => Promise<void>;
+  setViewport: (input: AgentBrowserViewportInput) => Promise<ThreadAgentBrowserState>;
+  navigate: (input: AgentBrowserNavigateInput) => Promise<ThreadAgentBrowserState>;
+  reload: (input: AgentBrowserThreadInput) => Promise<ThreadAgentBrowserState>;
+  goBack: (input: AgentBrowserThreadInput) => Promise<ThreadAgentBrowserState>;
+  goForward: (input: AgentBrowserThreadInput) => Promise<ThreadAgentBrowserState>;
+  newTab: (input: AgentBrowserTabInput) => Promise<ThreadAgentBrowserState>;
+  closeTab: (input: AgentBrowserTabInput) => Promise<ThreadAgentBrowserState>;
+  selectTab: (input: AgentBrowserTabInput) => Promise<ThreadAgentBrowserState>;
+  sendInput: (input: AgentBrowserSendInput) => Promise<void>;
+  ackFrame: (input: AgentBrowserAckFrameInput) => Promise<void>;
+  onEvent: (listener: (event: AgentBrowserEvent) => void) => () => void;
+}
+
 export type DesktopAppSnapPlatform = "macos" | "windows" | "linux" | "other";
 export type DesktopAppSnapPermission =
   | "granted"
@@ -607,6 +721,7 @@ export interface DesktopBridge {
     ) => () => void;
     onBrowserCopyLink: (listener: (event: BrowserCopyLinkEvent) => void) => () => void;
   };
+  agentBrowser: AgentBrowserControlMethods;
 }
 
 export interface NativeApi {

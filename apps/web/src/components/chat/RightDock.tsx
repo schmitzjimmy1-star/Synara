@@ -3,14 +3,7 @@
 // Layer: Chat right-dock UI
 // Depends on: ui/sidebar primitive, right-dock pane metadata, and a caller-provided pane renderer.
 
-import {
-  type CSSProperties,
-  type ReactNode,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
+import { type CSSProperties, type ReactNode, useEffect, useLayoutEffect, useState } from "react";
 
 import { cn } from "~/lib/utils";
 import {
@@ -56,7 +49,7 @@ import { useDesktopTopBarWindowControlsGutterClassName } from "~/hooks/useDeskto
 export const RIGHT_DOCK_MIN_WIDTH = 26 * 16;
 export const RIGHT_DOCK_DEFAULT_WIDTH = "max(28rem, calc(50vw - 8rem))";
 
-const RIGHT_DOCK_PREFERRED_WIDTH: Partial<Record<RightDockPaneKind, number>> = {};
+const RIGHT_DOCK_WIDTH_STORAGE_KEY = "synara:right-dock-width:v1";
 
 interface RightDockProps {
   state: RightDockThreadState;
@@ -93,14 +86,16 @@ function RightDockLauncher(props: {
       aria-label="Open a panel"
       className="flex h-full min-h-0 items-center justify-center overflow-y-auto p-6"
     >
-      <div className="flex w-full max-w-sm flex-col gap-1.5">
-        {props.items.map(({ kind, Icon, label }) => (
+      <div className="flex w-full max-w-lg flex-col gap-1.5">
+        {props.items.map(({ kind, Icon, label, disabled, unavailableReason }) => (
           <Button
             key={kind}
             variant="subtle"
             size="xl"
             className="h-11 w-full justify-start gap-3 rounded-xl px-4 text-[length:var(--app-font-size-ui-lg,13px)] font-normal"
             aria-label={`Open ${label}`}
+            title={unavailableReason}
+            disabled={disabled}
             onClick={() => props.onOpen(kind)}
           >
             <Icon className="size-4 shrink-0" />
@@ -182,32 +177,6 @@ export function RightDock(props: RightDockProps) {
     useDesktopTopBarWindowControlsGutterClassName();
 
   const keepMountedPaneIds = useKeepMountedPaneIds(props.state.panes, activePane);
-  // The dock must open as an exact 50/50 split of the chat shell. The CSS
-  // default can only approximate half (it cannot observe the resizable left
-  // sidebar), so on every open we measure the shell row hosting chat + dock and
-  // pin the dock width to exactly half of it. Mid-session drags still resize
-  // freely; the next open re-centers the split.
-  const contentRef = useRef<HTMLDivElement | null>(null);
-  const minWidth = props.minWidth;
-  const activePaneKind = activePane?.kind ?? null;
-  useEffect(() => {
-    if (!props.state.open) {
-      return;
-    }
-    const wrapper = contentRef.current?.closest<HTMLElement>("[data-slot='sidebar-wrapper']");
-    const shell = wrapper?.parentElement;
-    if (!wrapper || !shell) {
-      return;
-    }
-    // A phone-shaped pane has a natural width: half the shell leaves the device
-    // stranded in empty space, so kinds that render a fixed-aspect object open
-    // at their own comfortable size instead of the even split.
-    const preferredWidth = activePaneKind ? RIGHT_DOCK_PREFERRED_WIDTH[activePaneKind] : undefined;
-    const openWidth = preferredWidth ?? Math.round(shell.getBoundingClientRect().width / 2);
-    if (openWidth > 0) {
-      wrapper.style.setProperty("--sidebar-width", `${Math.max(minWidth, openWidth)}px`);
-    }
-  }, [props.state.open, minWidth, activePaneKind]);
   const renderedPanes = props.state.panes.filter(
     (pane) => pane.id === activePane?.id || keepMountedPaneIds.has(pane.id),
   );
@@ -260,13 +229,10 @@ export function RightDock(props: RightDockProps) {
         resizable={{
           minWidth: props.minWidth,
           shouldAcceptWidth: props.shouldAcceptWidth,
+          storageKey: RIGHT_DOCK_WIDTH_STORAGE_KEY,
         }}
       >
-        <div
-          ref={contentRef}
-          data-right-dock-content
-          className="flex h-full min-h-0 w-full flex-col"
-        >
+        <div data-right-dock-content className="flex h-full min-h-0 w-full flex-col">
           <div
             className={cn(
               CHAT_SURFACE_HEADER_ROW_CLASS_NAME,

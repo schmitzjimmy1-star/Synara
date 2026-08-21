@@ -13,21 +13,19 @@ import type { ThreadId } from "@synara/contracts";
 export type SidechatCreator = (options?: { initialPrompt?: string }) => Promise<unknown>;
 
 const creatorsByThreadId = new Map<ThreadId, SidechatCreator>();
-const waitersByThreadId = new Map<ThreadId, Set<(creator: SidechatCreator | undefined) => void>>();
+const listenersByThreadId = new Map<ThreadId, Set<() => void>>();
 
-function notifyCreatorWaiters(threadId: ThreadId, creator: SidechatCreator | undefined): void {
-  const waiters = waitersByThreadId.get(threadId);
-  if (!waiters) return;
-  waitersByThreadId.delete(threadId);
-  for (const resolve of waiters) resolve(creator);
+function notifyCreatorListeners(threadId: ThreadId): void {
+  for (const listener of listenersByThreadId.get(threadId) ?? []) listener();
 }
 
 export function registerSidechatCreator(threadId: ThreadId, creator: SidechatCreator): () => void {
   creatorsByThreadId.set(threadId, creator);
-  notifyCreatorWaiters(threadId, creator);
+  notifyCreatorListeners(threadId);
   return () => {
     if (creatorsByThreadId.get(threadId) === creator) {
       creatorsByThreadId.delete(threadId);
+      notifyCreatorListeners(threadId);
     }
   };
 }
@@ -36,29 +34,13 @@ export function getSidechatCreator(threadId: ThreadId): SidechatCreator | undefi
   return creatorsByThreadId.get(threadId);
 }
 
-// The dock can render one commit before its nested composer publishes the
-// creator. Wait briefly for that normal mount ordering instead of presenting a
-// flaky "unavailable" action to the user.
-export function waitForSidechatCreator(
-  threadId: ThreadId,
-  timeoutMs = 500,
-): Promise<SidechatCreator | undefined> {
-  const creator = getSidechatCreator(threadId);
-  if (creator) return Promise.resolve(creator);
-
-  return new Promise((resolve) => {
-    const waiters = waitersByThreadId.get(threadId) ?? new Set();
-    const finish = (nextCreator: SidechatCreator | undefined) => {
-      globalThis.clearTimeout(timeoutId);
-      resolve(nextCreator);
-    };
-    waiters.add(finish);
-    waitersByThreadId.set(threadId, waiters);
-    const timeoutId = globalThis.setTimeout(() => {
-      const pending = waitersByThreadId.get(threadId);
-      pending?.delete(finish);
-      if (pending?.size === 0) waitersByThreadId.delete(threadId);
-      resolve(undefined);
-    }, timeoutMs);
-  });
+export function subscribeSidechatCreator(threadId: ThreadId, listener: () => void): () => void {
+  const listeners = listenersByThreadId.get(threadId) ?? new Set();
+  listeners.add(listener);
+  listenersByThreadId.set(threadId, listeners);
+  return () => {
+    const current = listenersByThreadId.get(threadId);
+    current?.delete(listener);
+    if (current?.size === 0) listenersByThreadId.delete(threadId);
+  };
 }

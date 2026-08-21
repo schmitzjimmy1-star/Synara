@@ -79,9 +79,27 @@ export const DESKTOP_IPC_CHANNELS = {
       guestMessage: "desktop:browser-annotations-guest-message",
     },
   },
+  agentBrowser: {
+    getState: "desktop:agent-browser-get-state",
+    start: "desktop:agent-browser-start",
+    stop: "desktop:agent-browser-stop",
+    suspendPreview: "desktop:agent-browser-suspend-preview",
+    setViewport: "desktop:agent-browser-set-viewport",
+    navigate: "desktop:agent-browser-navigate",
+    reload: "desktop:agent-browser-reload",
+    goBack: "desktop:agent-browser-go-back",
+    goForward: "desktop:agent-browser-go-forward",
+    newTab: "desktop:agent-browser-new-tab",
+    closeTab: "desktop:agent-browser-close-tab",
+    selectTab: "desktop:agent-browser-select-tab",
+    sendInput: "desktop:agent-browser-send-input",
+    ackFrame: "desktop:agent-browser-ack-frame",
+    event: "desktop:agent-browser-event",
+  },
 } as const;
 
 export const BROWSER_IPC_CHANNELS = DESKTOP_IPC_CHANNELS.browser;
+export const AGENT_BROWSER_IPC_CHANNELS = DESKTOP_IPC_CHANNELS.agentBrowser;
 export const BROWSER_ANNOTATION_GUEST_COMMAND_CHANNEL = "desktop:browser-annotations-guest-command";
 export const APPSNAP_IPC_CHANNELS = DESKTOP_IPC_CHANNELS.appSnap;
 export const DESKTOP_WS_URL_CHANNEL = DESKTOP_IPC_CHANNELS.wsUrl;

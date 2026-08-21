@@ -8868,7 +8868,7 @@ export default function ChatView({
 
     let threadCreated = false;
     let turnStartedOrReconciling = false;
-    try {
+    const dispatchError = await (async (): Promise<unknown | null> => {
       await api.orchestration.dispatchCommand({
         type: "thread.create",
         commandId: newCommandId(),
@@ -8917,7 +8917,10 @@ export default function ChatView({
       // This view never made the new thread active, so arm its watchdog before
       // navigation. A later shell or router failure must not roll the turn back.
       markPendingTurnDispatch(nextThreadId);
-    } catch (err) {
+      return null;
+    })().catch((error: unknown) => error);
+    if (dispatchError !== null) {
+      const err = dispatchError;
       if (threadCreated && isAmbiguousOrchestrationDispatchFailure(err)) {
         turnStartedOrReconciling = true;
         markPendingTurnDispatch(nextThreadId);
@@ -8947,27 +8950,22 @@ export default function ChatView({
       // The durable task can render from the next push/reconnect snapshot.
     }
 
-    try {
-      if (turnStartedOrReconciling) {
-        // Signal that the plan sidebar should open on the new thread.
-        planSidebarOpenOnNextThreadRef.current = true;
-        await navigate({
-          to: "/$threadId",
-          params: { threadId: nextThreadId },
-        });
-      }
-    } catch {
-      if (turnStartedOrReconciling) {
+    if (turnStartedOrReconciling) {
+      // Signal that the plan sidebar should open on the new thread.
+      planSidebarOpenOnNextThreadRef.current = true;
+      await navigate({
+        to: "/$threadId",
+        params: { threadId: nextThreadId },
+      }).catch(() => {
         toastManager.add({
           type: "warning",
           title: "Implementation started",
           description:
             "Synara could not open the new thread automatically. It remains in the sidebar.",
         });
-      }
-    } finally {
-      finish();
+      });
     }
+    finish();
   }, [
     activeProject,
     activeProposedPlan,
