@@ -7,6 +7,7 @@ import {
   MAC_APPSNAP_HELPER_STAGE_PATH,
   MAC_ENTITLEMENTS_PATH,
   MAC_INHERITED_ENTITLEMENTS_PATH,
+  macBuildRequiresUpdateManifest,
   macTargetIncludesUpdateZip,
   MICROPHONE_USAGE_DESCRIPTION,
   NODE_PTY_ASAR_UNPACK_GLOBS,
@@ -70,6 +71,41 @@ describe("createDesktopPlatformBuildConfig", () => {
     assert.equal(macTargetIncludesUpdateZip("dmg"), true);
     assert.equal(macTargetIncludesUpdateZip("zip"), true);
     assert.equal(macTargetIncludesUpdateZip("dir"), false);
+  });
+
+  it("requires updater manifests only for publishable or mock update builds", () => {
+    assert.equal(
+      macBuildRequiresUpdateManifest({
+        signed: false,
+        mockUpdates: false,
+        hasPublishConfig: false,
+      }),
+      false,
+    );
+    assert.equal(
+      macBuildRequiresUpdateManifest({
+        signed: true,
+        mockUpdates: false,
+        hasPublishConfig: false,
+      }),
+      true,
+    );
+    assert.equal(
+      macBuildRequiresUpdateManifest({
+        signed: false,
+        mockUpdates: true,
+        hasPublishConfig: false,
+      }),
+      true,
+    );
+    assert.equal(
+      macBuildRequiresUpdateManifest({
+        signed: false,
+        mockUpdates: false,
+        hasPublishConfig: true,
+      }),
+      true,
+    );
   });
 
   it("leaves non-macOS platform configs unchanged", () => {

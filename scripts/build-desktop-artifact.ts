@@ -17,6 +17,7 @@ import serverPackageJson from "../apps/server/package.json" with { type: "json" 
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
 import {
   createDesktopPlatformBuildConfig,
+  macBuildRequiresUpdateManifest,
   macTargetIncludesUpdateZip,
   MAC_APPSNAP_HELPER_STAGE_PATH,
   validateDesktopNativeBuildHost,
@@ -1128,6 +1129,11 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
         finalizeMacUpdateZip({
           stageDistDir,
           signed: options.signed,
+          requireUpdateManifest: macBuildRequiresUpdateManifest({
+            signed: options.signed,
+            mockUpdates: options.mockUpdates,
+            hasPublishConfig: resolveGitHubPublishConfig() !== undefined,
+          }),
           verbose: options.verbose,
         }),
       catch: (cause) =>
