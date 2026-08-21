@@ -107,6 +107,7 @@ import { ServerEnvironment } from "./environment/Services/ServerEnvironment";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup";
 import { ServerSettingsService } from "./serverSettings";
+import { buildCodexRuntimeDiagnostics } from "./runtimeDiagnostics";
 import { isLoopbackHost } from "./startupAccess";
 import { TerminalManager } from "./terminal/Services/Manager";
 import { TerminalThreadTitleTracker } from "./terminal/terminalThreadTitleTracker";
@@ -1637,10 +1638,18 @@ const makeWsRpcHandlersLayer = () =>
         [WS_METHODS.serverGetDiagnostics]: () =>
           rpcEffect(
             Effect.gen(function* () {
-              const [projection, fullChildProcesses] = yield* Effect.all([
+              const [projection, fullChildProcesses, settings, sessions] = yield* Effect.all([
                 projectionReadModelQuery.getCounts(),
                 Effect.promise(() => readDescendantProcesses(process.pid)),
+                serverSettings.getSettings,
+                providerService.listSessions(),
               ]);
+              const codex = yield* Effect.promise(() =>
+                buildCodexRuntimeDiagnostics({
+                  settings: settings.providers.codex,
+                  sessions,
+                }),
+              );
               const memory = process.memoryUsage();
               const diagnostics: ServerDiagnosticsResult = {
                 generatedAt: new Date().toISOString(),
@@ -1662,6 +1671,7 @@ const makeWsRpcHandlersLayer = () =>
                   0,
                 ),
                 projection,
+                codex,
               };
               return diagnostics;
             }),

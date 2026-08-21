@@ -12,11 +12,21 @@ import {
   reconcileServerProviderStatuses,
   refreshServerConfigAfterTransportOpen,
   serverAllProviderUsageQueryOptions,
+  serverDiagnosticsQueryOptions,
   serverLocalServersQueryOptions,
   serverProviderUsageSnapshotQueryOptions,
   serverQueryKeys,
   sidebarLocalServersQueryOptions,
 } from "./serverReactQuery";
+
+describe("server diagnostics query", () => {
+  it("stays disabled until its settings surface is active", () => {
+    const options = serverDiagnosticsQueryOptions(false);
+    expect(options.queryKey).toEqual(serverQueryKeys.diagnostics());
+    expect(options.enabled).toBe(false);
+    expect(options.staleTime).toBe(5_000);
+  });
+});
 
 const READY_CODEX_STATUS = {
   provider: "codex",

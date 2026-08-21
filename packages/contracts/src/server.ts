@@ -243,6 +243,48 @@ export const ServerDiagnosticsChildProcess = Schema.Struct({
 });
 export type ServerDiagnosticsChildProcess = typeof ServerDiagnosticsChildProcess.Type;
 
+export const ServerDiagnosticsCodexRuntime = Schema.Struct({
+  ownership: Schema.Struct({
+    execution: Schema.Literal("codex"),
+    authentication: Schema.Literal("codex"),
+    modelRouting: Schema.Literal("codex-config"),
+    mcps: Schema.Literal("codex-config"),
+    skills: Schema.Literal("codex-app-server"),
+    plugins: Schema.Literal("codex-app-server"),
+  }),
+  binary: Schema.Struct({
+    status: Schema.Literals(["ready", "error"]),
+    configuredPath: Schema.String,
+    resolvedPath: Schema.NullOr(Schema.String),
+    source: Schema.NullOr(Schema.Literals(["explicit", "path", "official-app"])),
+    detail: Schema.NullOr(Schema.String),
+  }),
+  sourceHomePath: Schema.String,
+  profile: Schema.NullOr(Schema.String),
+  profileConfigPresent: Schema.Boolean,
+  route: Schema.Struct({
+    status: Schema.Literals(["ready", "invalid"]),
+    provider: Schema.NullOr(Schema.String),
+    kind: Schema.Literals(["openai", "custom-responses", "custom-incompatible", "unknown"]),
+    baseUrl: Schema.NullOr(Schema.String),
+    wireApi: Schema.NullOr(Schema.String),
+    credentialSource: Schema.NullOr(Schema.Literals(["codex-auth", "env", "command"])),
+    detail: Schema.optional(Schema.String),
+  }),
+  configuredMcpServerCount: NonNegativeInt,
+  activeSessions: Schema.Struct({
+    totalCount: NonNegativeInt,
+    runningCount: NonNegativeInt,
+    models: Schema.Array(
+      Schema.Struct({
+        model: Schema.String,
+        count: NonNegativeInt,
+      }),
+    ),
+  }),
+});
+export type ServerDiagnosticsCodexRuntime = typeof ServerDiagnosticsCodexRuntime.Type;
+
 export const ServerDiagnosticsResult = Schema.Struct({
   generatedAt: IsoDateTime,
   process: Schema.Struct({
@@ -257,6 +299,7 @@ export const ServerDiagnosticsResult = Schema.Struct({
     projectCount: NonNegativeInt,
     threadCount: NonNegativeInt,
   }),
+  codex: ServerDiagnosticsCodexRuntime,
 });
 export type ServerDiagnosticsResult = typeof ServerDiagnosticsResult.Type;
 

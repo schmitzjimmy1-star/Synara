@@ -9,6 +9,7 @@ import {
   parseCodexCustomProviderProfile,
   parseCodexConfigActiveProviderEnvKey,
   parseCodexConfigModelProvider,
+  parseCodexConfigMcpServerCount,
   parseCodexConfigProviderEnvKey,
   readActiveCodexProviderEnvKey,
 } from "./codexConfig";
@@ -30,6 +31,25 @@ afterEach(() => {
   for (const tempDir of tempDirs.splice(0)) {
     rmSync(tempDir, { recursive: true, force: true });
   }
+});
+
+describe("parseCodexConfigMcpServerCount", () => {
+  it("counts configured servers without returning their configuration", () => {
+    expect(
+      parseCodexConfigMcpServerCount(
+        [
+          "[mcp_servers.docs]",
+          'url = "https://example.test/mcp"',
+          "[mcp_servers.browser]",
+          'command = "browser-secret-command"',
+        ].join("\n"),
+      ),
+    ).toBe(2);
+  });
+
+  it("returns zero for malformed configuration", () => {
+    expect(parseCodexConfigMcpServerCount("[mcp_servers.invalid")).toBe(0);
+  });
 });
 
 describe("parseCodexConfigModelProvider", () => {
