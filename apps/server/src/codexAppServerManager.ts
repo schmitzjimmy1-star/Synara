@@ -993,11 +993,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       const configuredCodexBinaryPath = codexOptions.binaryPath ?? "codex";
       const codexHomePath = codexOptions.homePath;
       const codexProfile = codexOptions.profile;
-      const processEnv = await this.buildSessionProcessEnv(
-        threadId,
-        codexHomePath,
-        codexProfile,
-      );
+      const processEnv = await this.buildSessionProcessEnv(threadId, codexHomePath, codexProfile);
       const codexBinaryPath = resolveCodexBinary({
         configuredPath: configuredCodexBinaryPath,
         env: processEnv,
@@ -1756,11 +1752,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       const configuredCodexBinaryPath = codexOptions.binaryPath ?? "codex";
       const codexHomePath = codexOptions.homePath;
       const codexProfile = codexOptions.profile;
-      const processEnv = await this.buildSessionProcessEnv(
-        threadId,
-        codexHomePath,
-        codexProfile,
-      );
+      const processEnv = await this.buildSessionProcessEnv(threadId, codexHomePath, codexProfile);
       const codexBinaryPath = resolveCodexBinary({
         configuredPath: configuredCodexBinaryPath,
         env: processEnv,

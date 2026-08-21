@@ -11,10 +11,7 @@ import { parse as parseToml, type TomlTable } from "smol-toml";
 
 function isTomlTable(value: unknown): value is TomlTable {
   return (
-    typeof value === "object" &&
-    value !== null &&
-    !Array.isArray(value) &&
-    !(value instanceof Date)
+    typeof value === "object" && value !== null && !Array.isArray(value) && !(value instanceof Date)
   );
 }
 
@@ -26,10 +23,7 @@ function parseCodexConfig(content: string): TomlTable | undefined {
   }
 }
 
-function readProviderConfig(
-  content: string,
-  provider: string,
-): TomlTable | undefined {
+function readProviderConfig(content: string, provider: string): TomlTable | undefined {
   const providers = parseCodexConfig(content)?.model_providers;
   if (!isTomlTable(providers)) return undefined;
   const providerConfig = providers[provider];

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { CodexBinaryResolutionError, resolveCodexBinary } from "./codexBinary.ts";
+import { CodexBinaryResolutionError, resolveCodexBinary } from "./codexBinary";
 
 const tempDirectories: string[] = [];
 

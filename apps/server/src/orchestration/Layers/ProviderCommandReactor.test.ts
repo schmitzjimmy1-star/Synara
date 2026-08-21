@@ -540,16 +540,14 @@ describe("ProviderCommandReactor", () => {
         } as unknown as TextGenerationShape),
       ),
       Layer.provideMerge(
-        ServerSettingsService.layerTest(
-          {
-            ...(input?.gitWritingModelSelection
-              ? { textGenerationModelSelection: input.gitWritingModelSelection }
-              : {}),
-            ...(input?.codexProviderSettings
-              ? { providers: { codex: input.codexProviderSettings } }
-              : {}),
-          },
-        ),
+        ServerSettingsService.layerTest({
+          ...(input?.gitWritingModelSelection
+            ? { textGenerationModelSelection: input.gitWritingModelSelection }
+            : {}),
+          ...(input?.codexProviderSettings
+            ? { providers: { codex: input.codexProviderSettings } }
+            : {}),
+        }),
       ),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), baseDir)),
       Layer.provideMerge(NodeServices.layer),

@@ -166,9 +166,12 @@ describe("parseCodexCustomProviderProfile", () => {
   ])("fails closed for %s", (_label, baseUrlLine) => {
     expect(
       parseCodexCustomProviderProfile(
-        ['model_provider = "custom"', "[model_providers.custom]", baseUrlLine, 'wire_api = "responses"'].join(
-          "\n",
-        ),
+        [
+          'model_provider = "custom"',
+          "[model_providers.custom]",
+          baseUrlLine,
+          'wire_api = "responses"',
+        ].join("\n"),
       ),
     ).toBeUndefined();
   });

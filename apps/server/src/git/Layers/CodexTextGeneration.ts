@@ -363,8 +363,7 @@ const makeCodexTextGeneration = Effect.gen(function* () {
           }),
         );
         const codexBinaryPath = yield* Effect.try({
-          try: () =>
-            resolveCodexBinary({ configuredPath: configuredCodexBinaryPath, env }).path,
+          try: () => resolveCodexBinary({ configuredPath: configuredCodexBinaryPath, env }).path,
           catch: (cause) =>
             new TextGenerationError({
               operation,

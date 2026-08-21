@@ -53,7 +53,12 @@ function verifyOfficialMacBundle(candidate: string): boolean {
   const markerIndex = candidate.indexOf(marker);
   if (markerIndex < 0) return false;
   const bundlePath = candidate.slice(0, markerIndex + ".app".length);
-  const verification = spawnSync("/usr/bin/codesign", ["--verify", "--deep", "--strict", bundlePath]);
+  const verification = spawnSync("/usr/bin/codesign", [
+    "--verify",
+    "--deep",
+    "--strict",
+    bundlePath,
+  ]);
   if (verification.status !== 0) return false;
   const details = spawnSync("/usr/bin/codesign", ["-dv", "--verbose=4", bundlePath], {
     encoding: "utf8",
@@ -64,8 +69,8 @@ function verifyOfficialMacBundle(candidate: string): boolean {
   const teamIdentifier = /^TeamIdentifier=(.+)$/mu.exec(output)?.[1]?.trim();
   return Boolean(
     identifier &&
-      OPENAI_CODEX_BUNDLE_IDENTIFIERS.has(identifier) &&
-      teamIdentifier === OPENAI_TEAM_IDENTIFIER,
+    OPENAI_CODEX_BUNDLE_IDENTIFIERS.has(identifier) &&
+    teamIdentifier === OPENAI_TEAM_IDENTIFIER,
   );
 }
 
@@ -113,8 +118,7 @@ export function resolveCodexBinary(input: {
   }
 
   if (platform === "darwin") {
-    const officialCandidates =
-      input.officialMacCandidates ?? officialMacCodexBinaryCandidates();
+    const officialCandidates = input.officialMacCandidates ?? officialMacCodexBinaryCandidates();
     const verifier = input.verifyOfficialMacCandidate ?? verifyOfficialMacBundle;
     const officialPath = officialCandidates.find((candidate) => {
       const resolved = resolveExecutable(candidate, { env, platform });

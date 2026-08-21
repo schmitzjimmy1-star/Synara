@@ -190,9 +190,14 @@ export async function finalizeMacUpdateZip(
   const sha512 = await computeSha512Base64(zipPath);
 
   const updatedManifestPaths: string[] = [];
-  for (const manifestName of resolveMacUpdateManifestFileNames(distEntries, {
-    required: options.requireUpdateManifest,
-  })) {
+  const manifestResolutionOptions =
+    options.requireUpdateManifest === undefined
+      ? undefined
+      : { required: options.requireUpdateManifest };
+  for (const manifestName of resolveMacUpdateManifestFileNames(
+    distEntries,
+    manifestResolutionOptions,
+  )) {
     const manifestPath = join(options.stageDistDir, manifestName);
     const manifest = readFileSync(manifestPath, "utf8");
     const nextManifest = updateMacUpdateManifestZipEntry(manifest, zipFileName, {

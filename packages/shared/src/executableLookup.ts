@@ -10,7 +10,10 @@ export interface ExecutableLookupOptions {
   readonly allowExtensionlessOnWindows?: boolean;
   readonly cwd?: string;
 }
-export interface ExecutableCandidate { readonly directory: string; readonly path: string }
+export interface ExecutableCandidate {
+  readonly directory: string;
+  readonly path: string;
+}
 
 const DEFAULT_WINDOWS_PATH_EXTENSIONS: readonly string[] = [".COM", ".EXE", ".BAT", ".CMD"];
 
@@ -25,15 +28,20 @@ export function hasPathSeparator(command: string): boolean {
 export function windowsPathExtensions(env: NodeJS.ProcessEnv): readonly string[] {
   const rawValue = env.PATHEXT;
   if (!rawValue) return DEFAULT_WINDOWS_PATH_EXTENSIONS;
-  const parsed = rawValue.split(";").map((entry) => entry.trim()).filter(Boolean)
-    .map((entry) => entry.startsWith(".") ? entry.toUpperCase() : `.${entry.toUpperCase()}`);
+  const parsed = rawValue
+    .split(";")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => (entry.startsWith(".") ? entry.toUpperCase() : `.${entry.toUpperCase()}`));
   return parsed.length > 0 ? [...new Set(parsed)] : DEFAULT_WINDOWS_PATH_EXTENSIONS;
 }
 export function pathEntries(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): string[] {
   const pathValue = env.PATH ?? env.Path ?? env.path ?? "";
   if (!pathValue) return [];
-  return pathValue.split(platform === "win32" ? ";" : ":")
-    .map((entry) => entry.trim().replace(/^"+|"+$/g, "")).filter(Boolean);
+  return pathValue
+    .split(platform === "win32" ? ";" : ":")
+    .map((entry) => entry.trim().replace(/^"+|"+$/g, ""))
+    .filter(Boolean);
 }
 export function executableNameCandidates(
   command: string,
@@ -47,10 +55,17 @@ export function executableNameCandidates(
   const normalizedExtension = extension.toUpperCase();
   if (extension && extensions.includes(normalizedExtension)) {
     const stem = command.slice(0, -extension.length);
-    return [...new Set([command, `${stem}${normalizedExtension}`, `${stem}${normalizedExtension.toLowerCase()}`])];
+    return [
+      ...new Set([
+        command,
+        `${stem}${normalizedExtension}`,
+        `${stem}${normalizedExtension.toLowerCase()}`,
+      ]),
+    ];
   }
   const candidates = allowExtensionless ? [command] : [];
-  for (const value of extensions) candidates.push(`${command}${value}`, `${command}${value.toLowerCase()}`);
+  for (const value of extensions)
+    candidates.push(`${command}${value}`, `${command}${value.toLowerCase()}`);
   return [...new Set(candidates)];
 }
 function directoryOf(commandPath: string): string {
@@ -80,8 +95,17 @@ function lookupContext(options: ExecutableLookupOptions): LookupContext {
 function absoluteCandidate(candidate: string, cwd: string): string {
   return isAbsolute(candidate) ? candidate : resolve(cwd, candidate);
 }
-function* candidatesIn(command: string, context: LookupContext, allowExtensionless: boolean): Generator<ExecutableCandidate> {
-  const names = executableNameCandidates(command, context.platform, context.env, allowExtensionless);
+function* candidatesIn(
+  command: string,
+  context: LookupContext,
+  allowExtensionless: boolean,
+): Generator<ExecutableCandidate> {
+  const names = executableNameCandidates(
+    command,
+    context.platform,
+    context.env,
+    allowExtensionless,
+  );
   if (hasPathSeparator(command)) {
     for (const name of names) {
       yield {
@@ -100,8 +124,15 @@ function* candidatesIn(command: string, context: LookupContext, allowExtensionle
     }
   }
 }
-export function executableCandidates(command: string, options: ExecutableLookupOptions = {}): Generator<ExecutableCandidate> {
-  return candidatesIn(command, lookupContext(options), options.allowExtensionlessOnWindows ?? false);
+export function executableCandidates(
+  command: string,
+  options: ExecutableLookupOptions = {},
+): Generator<ExecutableCandidate> {
+  return candidatesIn(
+    command,
+    lookupContext(options),
+    options.allowExtensionlessOnWindows ?? false,
+  );
 }
 function isExecutableFileIn(filePath: string, context: LookupContext): boolean {
   try {
@@ -112,7 +143,9 @@ function isExecutableFileIn(filePath: string, context: LookupContext): boolean {
     }
     accessSync(filePath, constants.X_OK);
     return true;
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }
 export function isExecutableFile(filePath: string, options: ExecutableLookupOptions = {}): boolean {
   const context = lookupContext(options);
@@ -121,9 +154,16 @@ export function isExecutableFile(filePath: string, options: ExecutableLookupOpti
     context,
   );
 }
-export function resolveExecutable(command: string, options: ExecutableLookupOptions = {}): string | null {
+export function resolveExecutable(
+  command: string,
+  options: ExecutableLookupOptions = {},
+): string | null {
   const context = lookupContext(options);
-  for (const candidate of candidatesIn(command, context, options.allowExtensionlessOnWindows ?? false)) {
+  for (const candidate of candidatesIn(
+    command,
+    context,
+    options.allowExtensionlessOnWindows ?? false,
+  )) {
     if (!isExecutableFileIn(candidate.path, context)) continue;
     return candidate.path;
   }
@@ -133,5 +173,7 @@ export function executableIdentity(filePath: string): string | null {
   try {
     const stats = statSync(filePath);
     return `${stats.size}:${stats.mtimeMs}`;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }

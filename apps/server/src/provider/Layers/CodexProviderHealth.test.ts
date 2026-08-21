@@ -55,9 +55,7 @@ describe("probeCodexProviderHealth", () => {
     const binaryPath = installFakeCodex();
     const status = await Effect.runPromise(
       probeCodexProviderHealth().pipe(
-        Effect.provide(
-          ServerSettingsService.layerTest({ providers: { codex: { binaryPath } } }),
-        ),
+        Effect.provide(ServerSettingsService.layerTest({ providers: { codex: { binaryPath } } })),
       ) as Effect.Effect<unknown, never, never>,
     );
 
@@ -73,9 +71,7 @@ describe("probeCodexProviderHealth", () => {
     const binaryPath = "/definitely-missing/synara-codex";
     const status = await Effect.runPromise(
       probeCodexProviderHealth().pipe(
-        Effect.provide(
-          ServerSettingsService.layerTest({ providers: { codex: { binaryPath } } }),
-        ),
+        Effect.provide(ServerSettingsService.layerTest({ providers: { codex: { binaryPath } } })),
       ) as Effect.Effect<unknown, never, never>,
     );
 
