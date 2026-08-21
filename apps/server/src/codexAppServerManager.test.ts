@@ -1568,6 +1568,11 @@ describe("startSession", () => {
           threadId: asThreadId("thread-1"),
           provider: "codex",
           runtimeMode: "full-access",
+          providerOptions: {
+            codex: {
+              binaryPath: process.execPath,
+            },
+          },
         }),
       ).rejects.toThrow(
         "Codex CLI v0.36.0 is too old for Synara. Upgrade to v0.37.0 or newer and restart Synara.",
@@ -1612,6 +1617,11 @@ describe("startSession", () => {
           threadId: asThreadId("thread-auto-version"),
           provider: "codex",
           runtimeMode: "auto",
+          providerOptions: {
+            codex: {
+              binaryPath: process.execPath,
+            },
+          },
         }),
       ).rejects.toThrow("Codex Auto version gate");
       expect(versionCheck).toHaveBeenCalledTimes(1);
