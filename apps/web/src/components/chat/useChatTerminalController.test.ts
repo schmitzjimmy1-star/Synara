@@ -191,7 +191,7 @@ describe("useChatTerminalController", () => {
     terminalHarness.terminalState = terminalHarness.makeTerminalState(["terminal-1"]);
     for (const action of Object.values(terminalHarness.actions)) action.mockReset();
     nativeApi.confirm.mockReset().mockResolvedValue(true);
-    terminalSession.disposeAndClose.mockReset();
+    terminalSession.disposeAndClose.mockReset().mockResolvedValue(undefined);
     terminalLogic.shouldAutoDelete.mockReset().mockReturnValue(false);
     onDeletePlaceholderThread.mockReset();
   });
@@ -275,5 +275,28 @@ describe("useChatTerminalController", () => {
     expect(terminalHarness.actions.closeTerminal).toHaveBeenCalledWith(THREAD_ID, "terminal-1");
     expect(onDeletePlaceholderThread).not.toHaveBeenCalled();
     expect(result.terminalFocusRequestId).toBe(1);
+  });
+
+  it("closes every PTY in a terminal group before removing the group from UI state", async () => {
+    terminalHarness.terminalState = terminalHarness.makeTerminalState(["terminal-1", "terminal-2"]);
+    const result = render();
+
+    await result.closeTerminalGroupInStore("group-1");
+
+    expect(terminalSession.disposeAndClose).toHaveBeenCalledTimes(2);
+    expect(terminalSession.disposeAndClose).toHaveBeenNthCalledWith(1, {
+      api: expect.any(Object),
+      threadId: THREAD_ID,
+      terminalId: "terminal-1",
+    });
+    expect(terminalSession.disposeAndClose).toHaveBeenNthCalledWith(2, {
+      api: expect.any(Object),
+      threadId: THREAD_ID,
+      terminalId: "terminal-2",
+    });
+    expect(terminalHarness.actions.closeTerminalGroup).toHaveBeenCalledWith(THREAD_ID, "group-1");
+    expect(terminalHarness.actions.closeTerminalGroup.mock.invocationCallOrder[0]).toBeGreaterThan(
+      terminalSession.disposeAndClose.mock.invocationCallOrder[1] ?? 0,
+    );
   });
 });

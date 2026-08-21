@@ -37,6 +37,7 @@ import { newCommandId, randomUUID } from "../lib/utils";
 import { readNativeApi } from "../nativeApi";
 import { usePinnedThreadsStore } from "../pinnedThreadsStore";
 import { reconcileOptimisticPinState } from "../pinning.logic";
+import { useRightDockStore } from "../rightDockStore";
 import {
   resolveSplitViewFocusedThreadId,
   resolveSplitViewPaneIdForThread,
@@ -119,6 +120,8 @@ export function useSidebarThreadActions(input: {
   const clearProjectDraftThreadById = useComposerDraftStore(
     (store) => store.clearProjectDraftThreadById,
   );
+  const clearThreadDockState = useRightDockStore((store) => store.clearThreadDockState);
+  const closeThreadPaneReferences = useRightDockStore((store) => store.closeThreadPaneReferences);
   const persistedPinnedThreadIds = usePinnedThreadsStore((store) => store.pinnedThreadIds);
   const pinThreadLocally = usePinnedThreadsStore((store) => store.pinThread);
   const unpinThread = usePinnedThreadsStore((store) => store.unpinThread);
@@ -484,6 +487,8 @@ export function useSidebarThreadActions(input: {
           clearProjectDraftThreadById(thread.projectId, thread.id);
           clearTerminalState(threadId);
           removeThreadFromSplitViews(threadId);
+          clearThreadDockState(threadId);
+          closeThreadPaneReferences(threadId);
           clearTemporaryThread(threadId);
 
           if (routeSplitViewId && prepared?.deletedPaneInActiveSplit) {
@@ -530,6 +535,8 @@ export function useSidebarThreadActions(input: {
       clearProjectDraftThreadById,
       clearTemporaryThread,
       clearTerminalState,
+      clearThreadDockState,
+      closeThreadPaneReferences,
       handleNewChat,
       navigate,
       removeThreadFromSplitViews,

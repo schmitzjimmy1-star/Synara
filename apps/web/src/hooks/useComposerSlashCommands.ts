@@ -48,8 +48,10 @@ import { useComposerDraftStore } from "../composerDraftStore";
 import { dispatchThreadGoal, dispatchThreadGoalPaused } from "../threadGoal";
 import {
   createOrJoinSidechat,
+  createSidechatPreservingComposerDraft,
   createSidechatThread,
   sendSidechatPrompt,
+  sidechatCreationFlightKey,
   type SidechatCreationFlight,
 } from "../lib/sidechatCreation";
 
@@ -470,7 +472,7 @@ export function useComposerSlashCommands(input: {
 
       return createOrJoinSidechat({
         inFlightByKey: sidechatCreationByKeyRef.current,
-        flightKey: `${activeThread.id}:${sidechatModelSelection.provider}`,
+        flightKey: sidechatCreationFlightKey(activeThread.id, sidechatModelSelection),
         initialPrompt: inputOptions?.initialPrompt,
         startCreation: (initialPrompt) =>
           createSidechatThread({
@@ -965,8 +967,11 @@ export function useComposerSlashCommands(input: {
           ? { initialPrompt: prompt, targetProvider }
           : { initialPrompt: prompt };
         try {
-          editorActions.clearComposerSlashDraft();
-          await createSidechatFromSlashCommand(sidechatOptions);
+          await createSidechatPreservingComposerDraft({
+            readDraft: () => editorActions.resolveActiveComposerTrigger().snapshot.value,
+            clearDraft: editorActions.clearComposerSlashDraft,
+            create: () => createSidechatFromSlashCommand(sidechatOptions),
+          });
         } catch (error) {
           toastManager.add({
             type: "error",

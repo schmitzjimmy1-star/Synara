@@ -225,6 +225,21 @@ describe("TerminalManager", () => {
     ]);
   });
 
+  it("preserves the user's canonical CLI environment without managed wrappers", () => {
+    const env = __terminalManagerShellTesting.createTerminalSpawnEnv({
+      HOME: "/Users/example",
+      PATH: "/usr/local/bin:/usr/bin",
+      CODEX_HOME: "/Users/example/.codex",
+      ZDOTDIR: "/Users/example/.config/zsh",
+    });
+
+    expect(env.CODEX_HOME).toBe("/Users/example/.codex");
+    expect(env.PATH).toBe("/usr/local/bin:/usr/bin");
+    expect(env.ZDOTDIR).toBe("/Users/example/.config/zsh");
+    expect(env.SYNARA_MANAGED_BIN_DIR).toBeUndefined();
+    expect(env.SYNARA_ORIGINAL_ZDOTDIR).toBeUndefined();
+  });
+
   function makeManager(
     historyLineLimit = 5,
     options: {
@@ -278,6 +293,18 @@ describe("TerminalManager", () => {
     expect(third.threadId).toBe("thread-1");
     expect(ptyAdapter.spawnInputs).toHaveLength(1);
 
+    manager.dispose();
+  });
+
+  it("closes the synthetic dock terminal scope with its host thread", async () => {
+    const { manager, ptyAdapter } = makeManager();
+    await manager.open(openInput({ threadId: "thread-1", terminalId: "host" }));
+    await manager.open(openInput({ threadId: "dock-terminal:thread-1", terminalId: "dock" }));
+
+    await manager.close({ threadId: "thread-1", deleteHistory: true });
+
+    expect(ptyAdapter.processes).toHaveLength(2);
+    expect(ptyAdapter.processes.every((process) => process.killed)).toBe(true);
     manager.dispose();
   });
 
@@ -1264,6 +1291,19 @@ describe("TerminalManager", () => {
 
     expect(process.killSignals[0]).toBe("SIGTERM");
     expect(process.killSignals).toContain("SIGKILL");
+  });
+
+  it("persists the final buffered output before shutdown returns", async () => {
+    const { manager, ptyAdapter, logsDir } = makeManager(50, { processKillGraceMs: 1 });
+    await manager.open(openInput());
+    const process = ptyAdapter.processes[0];
+    expect(process).toBeDefined();
+    if (!process) return;
+
+    process.emitData("final output before quit\n");
+    await manager.disposeForShutdown();
+
+    expect(fs.readFileSync(historyLogPath(logsDir), "utf8")).toContain("final output before quit");
   });
 
   it("evicts oldest inactive terminal sessions when retention limit is exceeded", async () => {

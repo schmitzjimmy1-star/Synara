@@ -55,6 +55,41 @@ export interface SidechatCreationFlight {
   creationSettled: boolean;
 }
 
+function canonicalizeFlightKeyValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(canonicalizeFlightKeyValue);
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, entry]) => [key, canonicalizeFlightKeyValue(entry)]),
+    );
+  }
+  return value;
+}
+
+export function sidechatCreationFlightKey(
+  sourceThreadId: ThreadId,
+  modelSelection: ModelSelection,
+): string {
+  return `${sourceThreadId}:${JSON.stringify(canonicalizeFlightKeyValue(modelSelection))}`;
+}
+
+export async function createSidechatPreservingComposerDraft(input: {
+  readDraft: () => string;
+  clearDraft: () => void;
+  create: () => Promise<unknown>;
+}): Promise<void> {
+  const submittedDraft = input.readDraft();
+  await input.create();
+  // A slow fork must not erase text typed while it was being created. Clear only
+  // the exact slash draft that initiated the now-durable sidechat.
+  if (input.readDraft() === submittedDraft) {
+    input.clearDraft();
+  }
+}
+
 function scheduleSidechatFlightCleanup(
   inFlightByKey: Map<string, SidechatCreationFlight>,
   flightKey: string,

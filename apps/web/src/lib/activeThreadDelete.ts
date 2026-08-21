@@ -6,6 +6,8 @@
 import type { ThreadId } from "@synara/contracts";
 
 import { toastManager } from "../components/ui/toast";
+import { disposeAndCloseTerminalThreadSessions } from "../components/terminal/terminalSession";
+import { dockTerminalThreadId } from "./dockTerminalScope";
 import { readNativeApi } from "../nativeApi";
 import { useStore } from "../store";
 import { getThreadFromState, getThreadsFromState } from "../threadDerivation";
@@ -90,6 +92,22 @@ export async function deleteActiveThreadFromClient<TPrepared = undefined>(input:
   // reactor. Dispose only the local renderer after the durable delete intent
   // was accepted, so a rejected delete never tears down a live client session.
   await disposeThreadTerminalRuntimes(input.threadId);
+  const dockTerminalScopeId = dockTerminalThreadId(input.threadId);
+  try {
+    await disposeAndCloseTerminalThreadSessions({
+      api,
+      threadId: dockTerminalScopeId,
+      deleteHistory: true,
+    });
+  } catch (error) {
+    // The host delete is already durable. Do not strand client reconciliation
+    // because a synthetic dock scope was already absent or the transport moved.
+    console.error("Failed to close dock terminal scope for deleted thread", {
+      threadId: input.threadId,
+      dockTerminalScopeId,
+      error,
+    });
+  }
   if (input.reconcileDeletedThread ?? true) {
     void reconcileDeletedThreadFromClient({
       threadId: input.threadId,

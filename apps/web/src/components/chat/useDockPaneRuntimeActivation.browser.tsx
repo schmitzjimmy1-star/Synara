@@ -28,6 +28,7 @@ const BROWSER_PANE: RightDockPane = {
 interface RuntimeActivationProps {
   readonly threadId: ThreadId;
   readonly activePane: RightDockPane | null;
+  readonly dockOpen: boolean;
 }
 
 describe("useDockPaneRuntimeActivation", () => {
@@ -42,6 +43,7 @@ describe("useDockPaneRuntimeActivation", () => {
     const initialProps: RuntimeActivationProps = {
       threadId: THREAD_A,
       activePane: BROWSER_PANE,
+      dockOpen: true,
     };
 
     const hook = await renderHook(
@@ -49,6 +51,7 @@ describe("useDockPaneRuntimeActivation", () => {
         useDockPaneRuntimeActivation({
           threadId: props?.threadId ?? THREAD_A,
           activePane: props ? props.activePane : BROWSER_PANE,
+          dockOpen: props?.dockOpen ?? true,
         }),
       {
         initialProps,
@@ -60,14 +63,43 @@ describe("useDockPaneRuntimeActivation", () => {
       .poll(() => hook.result.current.activePaneRuntimeMode, { timeout: 1_000 })
       .toBe("live");
 
-    await hook.rerender({ threadId: THREAD_B, activePane: null });
-    await hook.rerender({ threadId: THREAD_A, activePane: { ...BROWSER_PANE } });
+    await hook.rerender({ threadId: THREAD_B, activePane: null, dockOpen: true });
+    await hook.rerender({
+      threadId: THREAD_A,
+      activePane: { ...BROWSER_PANE },
+      dockOpen: true,
+    });
 
     expect(hook.result.current.activePaneRuntimeMode).toBe("preview");
     await expect
       .poll(() => hook.result.current.activePaneRuntimeMode, { timeout: 1_000 })
       .toBe("live");
 
+    await hook.unmount();
+  });
+
+  it("keeps a restored collapsed terminal asleep until the dock opens", async () => {
+    const terminalPane: RightDockPane = { ...BROWSER_PANE, id: "terminal-pane", kind: "terminal" };
+    const initialProps: RuntimeActivationProps = {
+      threadId: THREAD_A,
+      activePane: terminalPane,
+      dockOpen: false,
+    };
+    const hook = await renderHook(
+      (props?: RuntimeActivationProps) => useDockPaneRuntimeActivation(props ?? initialProps),
+      {
+        initialProps,
+      },
+    );
+
+    expect(hook.result.current.activePaneRuntimeMode).toBe("preview");
+    await new Promise((resolve) => window.setTimeout(resolve, 350));
+    expect(hook.result.current.activePaneRuntimeMode).toBe("preview");
+
+    await hook.rerender({ threadId: THREAD_A, activePane: terminalPane, dockOpen: true });
+    await expect
+      .poll(() => hook.result.current.activePaneRuntimeMode, { timeout: 1_000 })
+      .toBe("live");
     await hook.unmount();
   });
 });

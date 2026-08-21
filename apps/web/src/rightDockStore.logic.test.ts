@@ -5,6 +5,7 @@ import {
   RIGHT_DOCK_PANE_KINDS,
   SINGLETON_PANE_KINDS,
   closePaneInState,
+  closeThreadPaneReferencesInState,
   createDefaultRightDockState,
   findMissingSidechatPaneIds,
   isRightDockPaneKind,
@@ -216,6 +217,24 @@ describe("sidechat pane", () => {
     expect(
       findMissingSidechatPaneIds(state, new Set([ThreadId.makeUnsafe("missing-thread")])),
     ).toEqual([]);
+  });
+
+  it("closes sidechat panes that reference a deleted thread", () => {
+    const sidechatThreadId = ThreadId.makeUnsafe("deleted-sidechat");
+    const withSidechat = openPaneInState(createDefaultRightDockState(), {
+      paneId: "side-pane",
+      kind: "sidechat",
+      threadId: sidechatThreadId,
+    });
+    const withExplorer = openPaneInState(withSidechat, {
+      paneId: "explorer-pane",
+      kind: "explorer",
+    });
+
+    const reconciled = closeThreadPaneReferencesInState(withExplorer, sidechatThreadId);
+
+    expect(reconciled.panes.map((pane) => pane.id)).toEqual(["explorer-pane"]);
+    expect(reconciled.activePaneId).toBe("explorer-pane");
   });
 });
 

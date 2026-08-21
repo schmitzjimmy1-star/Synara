@@ -12,6 +12,7 @@ import {
   type OpenPaneInput,
   type RightDockPane,
   type RightDockThreadState,
+  closeThreadPaneReferencesInState,
   closePaneInState,
   createDefaultRightDockState,
   openPaneInState,
@@ -55,6 +56,7 @@ interface RightDockStore {
     >,
   ) => void;
   clearThreadDockState: (threadId: ThreadId) => void;
+  closeThreadPaneReferences: (threadId: ThreadId) => void;
 }
 
 // Frozen shared snapshot: it is handed back from `selectRightDockState` for any
@@ -112,6 +114,19 @@ export const useRightDockStore = create<RightDockStore>()(
           const next = { ...store.dockStateByThreadId };
           delete next[threadId];
           return { dockStateByThreadId: next };
+        }),
+      closeThreadPaneReferences: (threadId) =>
+        set((store) => {
+          let changed = false;
+          const next = Object.fromEntries(
+            Object.entries(store.dockStateByThreadId).map(([hostThreadId, state]) => {
+              if (!state) return [hostThreadId, state];
+              const reconciled = closeThreadPaneReferencesInState(state, threadId);
+              changed ||= reconciled !== state;
+              return [hostThreadId, reconciled];
+            }),
+          );
+          return changed ? { dockStateByThreadId: next } : store;
         }),
     }),
     {

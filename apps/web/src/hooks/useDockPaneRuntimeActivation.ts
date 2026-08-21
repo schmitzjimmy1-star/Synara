@@ -25,6 +25,7 @@ const browserDockPaneHydrationScheduler: DeferredDockPaneHydrationScheduler = {
 export function useDockPaneRuntimeActivation(input: {
   threadId: ThreadId;
   activePane: RightDockPane | null;
+  dockOpen: boolean;
 }) {
   const immediateHydrationKindRef = useRef<RightDockPaneKind | "any" | null>(null);
   const [hydratedPaneKey, setHydratedPaneKey] = useState<string | null>(null);
@@ -52,6 +53,9 @@ export function useDockPaneRuntimeActivation(input: {
             immediateHydrationKindRef.current === activePaneKind
               ? "explicit"
               : "restore",
+          // A pane that was already live remains mounted while collapsed. A
+          // restored-but-never-hydrated heavy pane stays preview-only until the
+          // user actually opens the dock.
           hydrated: hydratedPaneKey === activePaneKey,
         })
       : "live";
@@ -96,6 +100,10 @@ export function useDockPaneRuntimeActivation(input: {
       return;
     }
 
+    if (!input.dockOpen && hydratedPaneKey !== activePaneKey) {
+      return;
+    }
+
     const reason =
       immediateHydrationKindRef.current === "any" ||
       immediateHydrationKindRef.current === activePaneKind
@@ -121,7 +129,7 @@ export function useDockPaneRuntimeActivation(input: {
       onHydrate: () => setHydratedPaneKey(activePaneKey),
       scheduler: browserDockPaneHydrationScheduler,
     });
-  }, [activePaneKey, activePaneKind, hydratedPaneKey]);
+  }, [activePaneKey, activePaneKind, hydratedPaneKey, input.dockOpen]);
 
   return {
     activePaneRuntimeMode,

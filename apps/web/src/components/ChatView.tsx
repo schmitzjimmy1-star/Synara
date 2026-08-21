@@ -4472,7 +4472,7 @@ export default function ChatView({
       onTerminalSessionExited: handleTerminalSessionExited,
       onCloseTerminalGroup: (groupId: string) => {
         if (!activeThreadId) return;
-        storeCloseTerminalGroup(activeThreadId, groupId);
+        void storeCloseTerminalGroup(groupId);
       },
       onHeightChange: setTerminalHeight,
       onResizeTerminalSplit: (groupId: string, splitId: string, weights: number[]) => {
