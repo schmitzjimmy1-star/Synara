@@ -23,8 +23,7 @@ describe("RIGHT_DOCK_ADD_MENU_KINDS", () => {
   });
 
   it("uses the Codex-facing labels while preserving secondary tools", () => {
-    expect(getRightDockPaneMeta("agentBrowser").label).toBe("Browser");
-    expect(getRightDockPaneMeta("browser").label).toBe("Manual Browser");
+    expect(getRightDockPaneMeta("browser").label).toBe("Browser");
     expect(getRightDockPaneMeta("explorer").label).toBe("Files");
     expect(getRightDockPaneMeta("sidechat").label).toBe("Side chat");
   });
@@ -43,13 +42,13 @@ describe("resolveRightDockLauncherItems", () => {
     ).toEqual([
       ["diff", "Review"],
       ["terminal", "Terminal"],
-      ["agentBrowser", "Browser"],
+      ["browser", "Browser"],
       ["explorer", "Files"],
       ["sidechat", "Side chat"],
     ]);
   });
 
-  it("does not put secondary manual browser or source control in the primary launcher", () => {
+  it("does not put source control in the primary launcher", () => {
     expect(
       resolveRightDockLauncherItems({
         hasWorkspace: true,
@@ -58,7 +57,7 @@ describe("resolveRightDockLauncherItems", () => {
         canStartSidechat: true,
         sidechatUnavailableReason: "Side chat unavailable",
       }).map(({ kind }) => kind),
-    ).toEqual(["diff", "terminal", "agentBrowser", "explorer", "sidechat"]);
+    ).toEqual(["diff", "terminal", "browser", "explorer", "sidechat"]);
   });
 
   it("disables workspace-backed destinations instead of shifting the launcher", () => {
@@ -73,7 +72,7 @@ describe("resolveRightDockLauncherItems", () => {
     ).toEqual([
       ["diff", true],
       ["terminal", true],
-      ["agentBrowser", false],
+      ["browser", false],
       ["explorer", true],
       ["sidechat", true],
     ]);
@@ -91,7 +90,7 @@ describe("resolveRightDockLauncherItems", () => {
     ).toEqual([
       ["diff", true],
       ["terminal", false],
-      ["agentBrowser", false],
+      ["browser", false],
       ["explorer", false],
       ["sidechat", false],
     ]);

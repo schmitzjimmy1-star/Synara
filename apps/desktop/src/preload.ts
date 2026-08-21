@@ -1,6 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
-  AgentBrowserEvent,
   BrowserAnnotationEvent,
   BrowserUseOpenPanelRequest,
   DesktopBridge,
@@ -258,32 +257,6 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       return () => {
         ipcRenderer.removeListener(IPC.browser.copyLink, wrappedListener);
       };
-    },
-  },
-  agentBrowser: {
-    getState: (input) => ipcRenderer.invoke(IPC.agentBrowser.getState, input),
-    start: (input) => ipcRenderer.invoke(IPC.agentBrowser.start, input),
-    stop: (input) => ipcRenderer.invoke(IPC.agentBrowser.stop, input),
-    suspendPreview: (input) => ipcRenderer.invoke(IPC.agentBrowser.suspendPreview, input),
-    setViewport: (input) => ipcRenderer.invoke(IPC.agentBrowser.setViewport, input),
-    navigate: (input) => ipcRenderer.invoke(IPC.agentBrowser.navigate, input),
-    reload: (input) => ipcRenderer.invoke(IPC.agentBrowser.reload, input),
-    goBack: (input) => ipcRenderer.invoke(IPC.agentBrowser.goBack, input),
-    goForward: (input) => ipcRenderer.invoke(IPC.agentBrowser.goForward, input),
-    newTab: (input) => ipcRenderer.invoke(IPC.agentBrowser.newTab, input),
-    closeTab: (input) => ipcRenderer.invoke(IPC.agentBrowser.closeTab, input),
-    selectTab: (input) => ipcRenderer.invoke(IPC.agentBrowser.selectTab, input),
-    sendInput: (input) => ipcRenderer.invoke(IPC.agentBrowser.sendInput, input),
-    ackFrame: (input) => ipcRenderer.invoke(IPC.agentBrowser.ackFrame, input),
-    onEvent: (listener) => {
-      const wrappedListener = (_event: Electron.IpcRendererEvent, payload: unknown) => {
-        if (!payload || typeof payload !== "object") return;
-        const type = (payload as { type?: unknown }).type;
-        if (type !== "state" && type !== "frame") return;
-        listener(payload as AgentBrowserEvent);
-      };
-      ipcRenderer.on(IPC.agentBrowser.event, wrappedListener);
-      return () => ipcRenderer.removeListener(IPC.agentBrowser.event, wrappedListener);
     },
   },
 } satisfies DesktopBridge);

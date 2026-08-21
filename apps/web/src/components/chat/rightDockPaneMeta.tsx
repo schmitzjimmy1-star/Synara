@@ -37,8 +37,7 @@ export interface RightDockLauncherItem extends RightDockPaneMeta {
 }
 
 export const RIGHT_DOCK_PANE_META: Record<RightDockPaneKind, RightDockPaneMeta> = {
-  agentBrowser: { label: "Browser", Icon: GlobeIcon },
-  browser: { label: "Manual Browser", Icon: GlobeIcon },
+  browser: { label: "Browser", Icon: GlobeIcon },
   diff: { label: "Review", Icon: DiffIcon },
   explorer: { label: "Files", Icon: FoldersIcon },
   file: { label: "File", Icon: FileIcon },
@@ -78,7 +77,7 @@ export const RIGHT_DOCK_ADD_MENU_KINDS: readonly RightDockPaneKind[] = RIGHT_DOC
 const RIGHT_DOCK_LAUNCHER_ORDER: readonly RightDockPaneKind[] = [
   "diff",
   "terminal",
-  "agentBrowser",
+  "browser",
   "explorer",
   "sidechat",
 ];

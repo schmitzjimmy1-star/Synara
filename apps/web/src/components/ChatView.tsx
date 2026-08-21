@@ -141,10 +141,6 @@ import {
   PROJECT_CREATE_SYNC_ERROR,
 } from "../lib/projectCreation";
 import {
-  maybeResolveBrowserPromptAttachment,
-  type BrowserPromptAttachmentResolution,
-} from "../lib/browserPromptContext";
-import {
   buildComposerFileAttachmentsFromFiles,
   stageUploadComposerAttachments,
   cloneComposerImageAttachment,
@@ -7098,49 +7094,6 @@ export default function ChatView({
         title: sendProviderAvailability.unavailableReason,
       });
       return false;
-    }
-
-    const browserPromptAttachment: BrowserPromptAttachmentResolution =
-      await maybeResolveBrowserPromptAttachment({
-        api,
-        threadId: activeThread.id,
-        prompt: promptForSend,
-      }).catch(
-        (): BrowserPromptAttachmentResolution => ({
-          requested: false,
-          image: null,
-        }),
-      );
-    if (browserPromptAttachment.image) {
-      const nextAttachmentCount =
-        composerImagesForSend.length +
-        composerFilesForSend.length +
-        composerAssistantSelectionsForSend.length +
-        (browserPromptAttachment.image ? 1 : 0);
-      if (nextAttachmentCount <= PROVIDER_SEND_TURN_MAX_ATTACHMENTS) {
-        composerImagesForSend = [...composerImagesForSend, browserPromptAttachment.image];
-      } else {
-        toastManager.add({
-          type: "warning",
-          title: `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} references per message.`,
-          description:
-            "The current browser screenshot was skipped because this message is already at the attachment limit.",
-        });
-      }
-    } else if (browserPromptAttachment.requested) {
-      const description =
-        browserPromptAttachment.reason === "no-open-browser"
-          ? "Open the in-app browser first, then try again."
-          : browserPromptAttachment.reason === "no-active-tab"
-            ? "The in-app browser has no active tab to capture yet."
-            : browserPromptAttachment.reason === "attachment-processing-failed"
-              ? "The browser screenshot could not be optimized for attachment."
-              : "The current browser context could not be attached.";
-      toastManager.add({
-        type: "warning",
-        title: "Couldn’t attach the in-app browser context",
-        description,
-      });
     }
 
     if (hasQueueableLiveTurn && dispatchMode === "queue" && queuedChatTurn === null) {

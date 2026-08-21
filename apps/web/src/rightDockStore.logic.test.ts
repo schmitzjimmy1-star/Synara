@@ -19,7 +19,6 @@ import {
 describe("RIGHT_DOCK_PANE_KINDS (single source of truth)", () => {
   it("lists every supported kind", () => {
     expect([...RIGHT_DOCK_PANE_KINDS]).toEqual([
-      "agentBrowser",
       "browser",
       "diff",
       "explorer",
@@ -41,7 +40,6 @@ describe("RIGHT_DOCK_PANE_KINDS (single source of truth)", () => {
 describe("isRightDockPaneKind", () => {
   it("accepts the known pane kinds", () => {
     for (const kind of [
-      "agentBrowser",
       "browser",
       "diff",
       "explorer",
@@ -107,6 +105,17 @@ describe("pull request pane", () => {
 });
 
 describe("sanitizeRightDockThreadState", () => {
+  it("migrates the retired agent browser pane to the native browser", () => {
+    const state = sanitizeRightDockThreadState({
+      open: true,
+      activePaneId: "legacy-browser",
+      panes: [{ id: "legacy-browser", kind: "agentBrowser" }],
+    });
+
+    expect(state.activePaneId).toBe("legacy-browser");
+    expect(state.panes).toMatchObject([{ id: "legacy-browser", kind: "browser" }]);
+  });
+
   it("keeps recognized panes and a valid active tab", () => {
     const state = sanitizeRightDockThreadState({
       open: true,

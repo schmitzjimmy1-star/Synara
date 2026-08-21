@@ -10,7 +10,6 @@ import { isPlainObject, sanitizeStringKeyedRecord } from "./persistedRecord";
 // validator, the per-kind metadata map, and the add-menu order are all derived
 // from this list so they can never drift apart.
 export const RIGHT_DOCK_PANE_KINDS = [
-  "agentBrowser",
   "browser",
   "diff",
   "explorer",
@@ -83,12 +82,13 @@ function sanitizePersistedPane(value: unknown): RightDockPane | null {
     return null;
   }
   const candidate = value;
-  if (typeof candidate.id !== "string" || !isRightDockPaneKind(candidate.kind)) {
+  const kind = candidate.kind === "agentBrowser" ? "browser" : candidate.kind;
+  if (typeof candidate.id !== "string" || !isRightDockPaneKind(kind)) {
     return null;
   }
   return {
     id: candidate.id,
-    kind: candidate.kind,
+    kind,
     threadId: typeof candidate.threadId === "string" ? (candidate.threadId as ThreadId) : null,
     diffTurnId: typeof candidate.diffTurnId === "string" ? (candidate.diffTurnId as TurnId) : null,
     diffFilePath: typeof candidate.diffFilePath === "string" ? candidate.diffFilePath : null,
