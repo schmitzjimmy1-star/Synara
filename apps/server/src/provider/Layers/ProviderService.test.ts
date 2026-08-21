@@ -3191,6 +3191,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
         codex: {
           homePath: "/tmp/custom-codex-home",
           binaryPath: "/usr/local/bin/codex",
+          routeFingerprint: "route-fingerprint-v1",
         },
       };
 

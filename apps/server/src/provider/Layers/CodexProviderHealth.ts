@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import { ServerProviderUpdateError, type ServerProviderStatus } from "@synara/contracts";
+import { resolveCodexBinary } from "@synara/shared/codexBinary";
 import { Effect, Layer, PubSub, Ref, Stream } from "effect";
 
 import { buildCodexProcessEnv } from "../../codexProcessEnv.ts";
@@ -15,10 +16,10 @@ import { ProviderHealth, type ProviderHealthShape } from "../Services/ProviderHe
 
 const execFileAsync = promisify(execFile);
 
-const probeCodex = Effect.fn("CodexProviderHealth.probe")(function* () {
+export const probeCodexProviderHealth = Effect.fn("CodexProviderHealth.probe")(function* () {
   const serverSettings = yield* ServerSettingsService;
   const settings = yield* serverSettings.getSettings;
-  const binaryPath = settings.providers.codex.binaryPath.trim() || "codex";
+  const configuredBinaryPath = settings.providers.codex.binaryPath.trim() || "codex";
   const homePath = settings.providers.codex.homePath.trim();
   const profile = settings.providers.codex.profile.trim();
   const checkedAt = new Date().toISOString();
@@ -30,10 +31,23 @@ const probeCodex = Effect.fn("CodexProviderHealth.probe")(function* () {
   );
 
   return yield* Effect.tryPromise({
-    try: () => execFileAsync(binaryPath, ["--version"], { env, timeout: 4_000 }),
+    try: async () => {
+      const resolution = resolveCodexBinary({ configuredPath: configuredBinaryPath, env });
+      const output = await execFileAsync(resolution.path, ["--version"], {
+        env,
+        timeout: 4_000,
+      });
+      return { ...output, resolution };
+    },
     catch: (cause) => cause,
   }).pipe(
-    Effect.map(({ stdout, stderr }): ServerProviderStatus => {
+    Effect.tap(({ resolution }) =>
+      Effect.logInfo("Codex provider health resolved executable", {
+        binaryPath: resolution.path,
+        source: resolution.source,
+      }),
+    ),
+    Effect.map(({ stdout, stderr, resolution }): ServerProviderStatus => {
       const version = parseCodexCliVersion(`${stdout}\n${stderr}`);
       return {
         provider: "codex",
@@ -45,10 +59,12 @@ const probeCodex = Effect.fn("CodexProviderHealth.probe")(function* () {
         supportsAutoRuntimeMode:
           version !== null &&
           compareCodexCliVersions(version, MINIMUM_CODEX_AUTO_REVIEW_CLI_VERSION) >= 0,
-        autoRuntimeModeBinaryPath: binaryPath,
-        message: homePath
-          ? `Codex CLI is available through ${homePath}${profile ? ` (profile: ${profile})` : ""}.`
-          : "Codex CLI is available.",
+        // Match the settings identity used by the web capability guard. The
+        // resolved absolute path remains visible in the message below.
+        autoRuntimeModeBinaryPath: configuredBinaryPath,
+        message: `Codex CLI is available at ${resolution.path}${
+          resolution.source === "official-app" ? " (official app bundle)" : ""
+        }${homePath ? ` through ${homePath}${profile ? ` (profile: ${profile})` : ""}` : ""}.`,
       };
     }),
     Effect.catch((cause) =>
@@ -58,14 +74,14 @@ const probeCodex = Effect.fn("CodexProviderHealth.probe")(function* () {
         available: false,
         authStatus: "unknown",
         checkedAt,
-        autoRuntimeModeBinaryPath: binaryPath,
+        autoRuntimeModeBinaryPath: configuredBinaryPath,
         message: `Codex CLI health check failed: ${cause instanceof Error ? cause.message : String(cause)}.`,
       } satisfies ServerProviderStatus),
     ),
   );
 });
 
-const probeCodexSafely = probeCodex().pipe(
+const probeCodexSafely = probeCodexProviderHealth().pipe(
   Effect.catch((cause) =>
     Effect.succeed({
       provider: "codex",
@@ -85,7 +101,17 @@ export const CodexProviderHealthLive = Layer.effect(
     const probe = probeCodexSafely.pipe(
       Effect.provideService(ServerSettingsService, serverSettings),
     );
-    const initial = yield* probe;
+    // Settings hydrate after layers are constructed. Never execute an
+    // unconfigured PATH binary during construction; effectServer performs the
+    // first real refresh immediately after persisted settings load.
+    const initial: ServerProviderStatus = {
+      provider: "codex",
+      status: "warning",
+      available: false,
+      authStatus: "unknown",
+      checkedAt: new Date().toISOString(),
+      message: "Codex CLI status is loading.",
+    };
     const statuses = yield* Ref.make<ReadonlyArray<ServerProviderStatus>>([initial]);
     const changes = yield* PubSub.unbounded<ReadonlyArray<ServerProviderStatus>>();
 

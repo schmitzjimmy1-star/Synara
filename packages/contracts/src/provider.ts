@@ -40,6 +40,7 @@ export const ProviderSession = Schema.Struct({
   runtimeMode: RuntimeMode,
   cwd: Schema.optional(TrimmedNonEmptyString),
   model: Schema.optional(TrimmedNonEmptyString),
+  providerConfigFingerprint: Schema.optional(TrimmedNonEmptyString),
   threadId: ThreadId,
   resumeCursor: Schema.optional(Schema.Unknown),
   activeTurnId: Schema.optional(TurnId),

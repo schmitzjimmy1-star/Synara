@@ -8,8 +8,28 @@ import type {
 } from "../terminal/processTreeKiller";
 import {
   ProviderProcessExitUnprovenError,
+  teardownChildProcessTree,
   teardownProviderProcessTree,
 } from "./supervisedProcessTeardown";
+
+describe("teardownChildProcessTree", () => {
+  it("treats a spawn failure with no PID as a process that never started", async () => {
+    await expect(
+      teardownChildProcessTree(
+        {
+          pid: undefined,
+          exitCode: null,
+          signalCode: null,
+          once: () => undefined,
+          removeListener: () => undefined,
+        },
+        async () => {
+          throw new Error("teardown must not run");
+        },
+      ),
+    ).resolves.toEqual({ escalated: false, signalErrors: [] });
+  });
+});
 
 function deterministicClock() {
   let now = 0;

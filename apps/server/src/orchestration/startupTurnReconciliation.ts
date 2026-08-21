@@ -65,6 +65,7 @@ type RestartReconciliationCommand = ThreadSessionSetCommand | ThreadActivityAppe
 /** Minimal persisted thread shape the planner inspects (a superset is fine). */
 export interface ReconcilableThread {
   readonly id: ThreadId;
+  readonly deletedAt: string | null;
   readonly runtimeMode: RuntimeMode;
   readonly session: OrchestrationSession | null;
   readonly latestTurn: { readonly state: "running" | "interrupted" | "completed" | "error" } | null;
@@ -202,6 +203,12 @@ export function planRestartTurnReconciliation(input: {
 }): ReadonlyArray<RestartReconciliationCommand> {
   const commands: RestartReconciliationCommand[] = [];
   for (const thread of input.threads) {
+    // Soft-deleted rows remain in the command read model for retention and
+    // idempotency, but lifecycle invariants forbid mutating them. They have no
+    // user-visible runtime left to heal, so reconciliation must ignore them.
+    if (thread.deletedAt !== null) {
+      continue;
+    }
     const hasInFlightTurn = threadHasInFlightTurn(thread);
     commands.push(...planStalePendingRequestCommands({ thread, now: input.now }));
     const staleCheckpointRevertCommand = planStaleCheckpointRevertCommand({
@@ -283,10 +290,11 @@ export const reconcileRestartStuckTurns: Effect.Effect<
   const now = new Date().toISOString();
   const threadsNeedingRestartCleanup = readModel.threads.filter(
     (thread) =>
-      needsRestartReconciliation(thread) ||
-      threadHasCheckpointRevertInProgress(thread) ||
-      thread.hasPendingApprovals ||
-      thread.hasPendingUserInput,
+      thread.deletedAt === null &&
+      (needsRestartReconciliation(thread) ||
+        threadHasCheckpointRevertInProgress(thread) ||
+        thread.hasPendingApprovals ||
+        thread.hasPendingUserInput),
   );
   if (threadsNeedingRestartCleanup.length === 0) {
     return;

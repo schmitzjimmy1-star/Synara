@@ -5,6 +5,7 @@
 
 import { PROVIDER_DISPLAY_NAMES, type ServerProviderStatus } from "@synara/contracts";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "../ui/alert";
+import { Button } from "../ui/button";
 import { IconButton } from "../ui/icon-button";
 import {
   EXPANDED_NOTIFICATION_SURFACE_CLASS_NAME,
@@ -16,9 +17,13 @@ import { ChatColumnBannerFrame } from "./ChatColumnBannerFrame";
 
 export const ProviderHealthBanner = function ProviderHealthBanner({
   onDismiss,
+  onOpenSettings,
+  onRetry,
   status,
 }: {
   onDismiss?: () => void;
+  onOpenSettings?: () => void;
+  onRetry?: () => void;
   status: ServerProviderStatus | null;
 }) {
   if (!status || status.status === "ready") {
@@ -47,6 +52,20 @@ export const ProviderHealthBanner = function ProviderHealthBanner({
         >
           {status.message ?? defaultMessage}
         </AlertDescription>
+        {onOpenSettings || onRetry ? (
+          <div className="col-start-2 mt-2 flex items-center gap-2">
+            {onRetry ? (
+              <Button size="xs" variant="outline" onClick={onRetry}>
+                Retry
+              </Button>
+            ) : null}
+            {onOpenSettings ? (
+              <Button size="xs" variant="ghost" onClick={onOpenSettings}>
+                Open agent settings
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
         {onDismiss ? (
           <AlertAction className="absolute top-2 right-2">
             <IconButton

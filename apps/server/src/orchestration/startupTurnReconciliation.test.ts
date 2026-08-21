@@ -13,6 +13,7 @@ const makeThread = (
   overrides: Partial<Omit<ReconcilableThread, "id">> = {},
 ): ReconcilableThread => ({
   id: ThreadId.makeUnsafe(id),
+  deletedAt: null,
   runtimeMode: "full-access",
   session: null,
   latestTurn: null,
@@ -82,6 +83,27 @@ describe("planRestartTurnReconciliation", () => {
     ];
 
     expect(planRestartTurnReconciliation({ threads, now: NOW })).toEqual([]);
+  });
+
+  it("ignores soft-deleted threads even when their retained state looks stuck", () => {
+    const thread = makeThread("deleted-stuck", {
+      deletedAt: "2026-06-13T09:30:00.000Z",
+      session: makeSession("deleted-stuck", {
+        status: "running",
+        activeTurnId: TurnId.makeUnsafe("deleted-stuck-turn"),
+      }),
+      latestTurn: { state: "running" },
+      activities: [
+        makeActivity(
+          "deleted-approval-requested",
+          "approval.requested",
+          { requestId: "deleted-approval", requestKind: "command" },
+          1,
+        ),
+      ],
+    });
+
+    expect(planRestartTurnReconciliation({ threads: [thread], now: NOW })).toEqual([]);
   });
 
   it("clears a dangling active turn id while preserving the terminal error session", () => {

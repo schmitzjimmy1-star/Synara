@@ -60,6 +60,14 @@
       "types": "./src/codexConfig.ts",
       "import": "./src/codexConfig.ts"
     },
+    "./codexBinary": {
+      "types": "./src/codexBinary.ts",
+      "import": "./src/codexBinary.ts"
+    },
+    "./executableLookup": {
+      "types": "./src/executableLookup.ts",
+      "import": "./src/executableLookup.ts"
+    },
     "./desktopChrome": {
       "types": "./src/desktopChrome.ts",
       "import": "./src/desktopChrome.ts"
@@ -284,7 +292,8 @@
   },
   "dependencies": {
     "@synara/contracts": "workspace:*",
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "smol-toml": "^1.6.1"
   },
   "devDependencies": {
     "@effect/language-service": "catalog:",

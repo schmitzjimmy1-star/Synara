@@ -45,6 +45,14 @@ export function macTargetIncludesUpdateZip(target: string): boolean {
   return target === "dmg" || target === "zip";
 }
 
+export function macBuildRequiresUpdateManifest(input: {
+  readonly hasPublishConfig: boolean;
+  readonly mockUpdates: boolean;
+  readonly signed: boolean;
+}): boolean {
+  return input.signed || input.mockUpdates || input.hasPublishConfig;
+}
+
 export function validateDesktopNativeBuildHost(input: DesktopNativeBuildHostInput): string | null {
   if (input.platform === "mac" && input.hostPlatform !== "darwin") {
     return [

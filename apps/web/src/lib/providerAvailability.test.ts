@@ -169,6 +169,27 @@ describe("normalizeProviderStatusForLocalConfig", () => {
       }),
     ).toEqual(status);
   });
+
+  it("preserves Auto capability when the default Codex command resolves absolutely", () => {
+    const status: ServerProviderStatus = {
+      provider: "codex",
+      status: "ready",
+      available: true,
+      authStatus: "authenticated",
+      supportsAutoRuntimeMode: true,
+      autoRuntimeModeBinaryPath: "codex",
+      checkedAt: BASE_STATUS.checkedAt,
+      message: "Codex CLI is available at /Applications/ChatGPT.app/Contents/Resources/codex.",
+    };
+
+    expect(
+      normalizeProviderStatusForLocalConfig({
+        provider: "codex",
+        status,
+        customBinaryPath: "codex",
+      }),
+    ).toEqual(status);
+  });
 });
 
 describe("isProviderUsable", () => {

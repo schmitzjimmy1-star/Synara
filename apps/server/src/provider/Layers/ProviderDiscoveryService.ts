@@ -12,7 +12,7 @@ import {
   type ProviderListSkillsResult,
   ProviderReadPluginInput,
 } from "@synara/contracts";
-import { isOpenRouterCodexConfig } from "@synara/shared/codexConfig";
+import { isCodexResponsesProviderConfig } from "@synara/shared/codexConfig";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -67,11 +67,11 @@ const disabledCapabilitiesForProvider = (
 
 const decodeProviderModelDescriptorOption = Schema.decodeUnknownOption(ProviderModelDescriptor);
 
-async function isValidatedOpenRouterHome(homePath: string, profile: string): Promise<boolean> {
+async function isValidatedCustomProviderHome(homePath: string, profile: string): Promise<boolean> {
   try {
     const resolvedHome = homePath || process.env.CODEX_HOME?.trim() || join(homedir(), ".codex");
     const configName = profile ? `${profile}.config.toml` : "config.toml";
-    return isOpenRouterCodexConfig(await readFile(join(resolvedHome, configName), "utf8"));
+    return isCodexResponsesProviderConfig(await readFile(join(resolvedHome, configName), "utf8"));
   } catch {
     return false;
   }
@@ -281,7 +281,7 @@ const make = Effect.gen(function* () {
           settings.providers.codex.profile.trim().length > 0) &&
         configuredModelSet.size > 0 &&
         (yield* Effect.promise(() =>
-          isValidatedOpenRouterHome(
+          isValidatedCustomProviderHome(
             settings.providers.codex.homePath.trim(),
             settings.providers.codex.profile.trim(),
           ),
@@ -295,7 +295,7 @@ const make = Effect.gen(function* () {
               ...discovered,
               // Codex's built-in model/list catalog does not necessarily know
               // every slug accepted by a custom provider. The configured list
-              // is the OpenRouter allowlist and therefore the source of truth;
+              // is the custom provider allowlist and therefore the source of truth;
               // preserve live capability metadata when Codex has it, then add
               // a minimal descriptor for every configured provider/model slug.
               models: configuredModels.map((slug) => {

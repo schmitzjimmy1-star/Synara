@@ -14,6 +14,7 @@ import type {
   ProviderForkThreadResult,
   ProviderRuntimeEvent,
   ProviderSession,
+  ServerSettings,
 } from "@synara/contracts";
 import {
   ApprovalRequestId,
@@ -210,6 +211,7 @@ describe("ProviderCommandReactor", () => {
     readonly commandEventTimeout?: Duration.Duration;
     readonly gatewayOperationId?: string;
     readonly gitWritingModelSelection?: ModelSelection;
+    readonly codexProviderSettings?: Partial<ServerSettings["providers"]["codex"]>;
   }) {
     const now = new Date().toISOString();
     const baseDir = input?.baseDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "synara-reactor-"));
@@ -236,6 +238,19 @@ describe("ProviderCommandReactor", () => {
         typeof input === "object" && input !== null && "resumeCursor" in input
           ? input.resumeCursor
           : undefined;
+      const providerConfigFingerprint =
+        typeof input === "object" &&
+        input !== null &&
+        "providerOptions" in input &&
+        typeof input.providerOptions === "object" &&
+        input.providerOptions !== null &&
+        "codex" in input.providerOptions &&
+        typeof input.providerOptions.codex === "object" &&
+        input.providerOptions.codex !== null &&
+        "routeFingerprint" in input.providerOptions.codex &&
+        typeof input.providerOptions.codex.routeFingerprint === "string"
+          ? input.providerOptions.codex.routeFingerprint
+          : undefined;
       const threadId =
         typeof input === "object" &&
         input !== null &&
@@ -256,6 +271,7 @@ describe("ProviderCommandReactor", () => {
         ...(sessionModelSelection.model !== undefined
           ? { model: sessionModelSelection.model }
           : {}),
+        ...(providerConfigFingerprint ? { providerConfigFingerprint } : {}),
         threadId,
         resumeCursor: resumeCursor ?? { opaque: `resume-${sessionIndex}` },
         createdAt: now,
@@ -524,11 +540,14 @@ describe("ProviderCommandReactor", () => {
         } as unknown as TextGenerationShape),
       ),
       Layer.provideMerge(
-        ServerSettingsService.layerTest(
-          input?.gitWritingModelSelection
+        ServerSettingsService.layerTest({
+          ...(input?.gitWritingModelSelection
             ? { textGenerationModelSelection: input.gitWritingModelSelection }
-            : {},
-        ),
+            : {}),
+          ...(input?.codexProviderSettings
+            ? { providers: { codex: input.codexProviderSettings } }
+            : {}),
+        }),
       ),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), baseDir)),
       Layer.provideMerge(NodeServices.layer),
@@ -541,6 +560,7 @@ describe("ProviderCommandReactor", () => {
       Effect.runPromise(PubSub.publish(runtimeEventPubSub, event).pipe(Effect.asVoid));
 
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
+    const serverSettings = await runtime.runPromise(Effect.service(ServerSettingsService));
     // Fault injection for command admission. The reactor resolves
     // `dispatch` off the shared engine service on every call, so swapping the
     // property here is observed by the reactor without rebuilding the layer.
@@ -621,6 +641,7 @@ describe("ProviderCommandReactor", () => {
 
     return {
       engine,
+      serverSettings,
       reactor,
       startSession,
       listSessions,
@@ -6968,6 +6989,149 @@ describe("ProviderCommandReactor", () => {
       threadId: ThreadId.makeUnsafe("thread-1"),
       input: "switch directions",
     });
+  });
+
+  it("preserves a slashless Codex model when OpenRouter models are configured", async () => {
+    const harness = await createHarness({
+      codexProviderSettings: {
+        homePath: "/tmp/codex-openrouter",
+        customModels: ["openai/gpt-5.6-sol"],
+      },
+    });
+    const modelSelection: ModelSelection = {
+      provider: "codex",
+      model: "gpt-5.6-sol",
+    };
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-slashless-codex-model"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-slashless-codex-model"),
+          role: "user",
+          text: "keep the exact selected model",
+          attachments: [],
+        },
+        modelSelection,
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 1);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({ modelSelection });
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({ modelSelection });
+  });
+
+  it("preserves the thread's slashless Codex model when a turn omits a selection", async () => {
+    const modelSelection: ModelSelection = {
+      provider: "codex",
+      model: "gpt-5.6-sol",
+    };
+    const harness = await createHarness({
+      threadModelSelection: modelSelection,
+      codexProviderSettings: {
+        homePath: "/tmp/codex-openrouter",
+        customModels: ["openai/gpt-5.6-sol"],
+      },
+    });
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-thread-slashless-codex-model"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-thread-slashless-codex-model"),
+          role: "user",
+          text: "keep the thread's selected model",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 1);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({ modelSelection });
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({ modelSelection });
+  });
+
+  it("restarts without the old resume cursor when the Codex route changes", async () => {
+    const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), "synara-reactor-route-"));
+    createdBaseDirs.add(codexHome);
+    fs.writeFileSync(path.join(codexHome, "route-a.config.toml"), 'model_provider = "a"\n');
+    fs.writeFileSync(path.join(codexHome, "route-b.config.toml"), 'model_provider = "b"\n');
+    const harness = await createHarness({
+      codexProviderSettings: { homePath: codexHome, profile: "route-a" },
+    });
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-route-a-turn"),
+        threadId,
+        message: {
+          messageId: asMessageId("user-message-route-a"),
+          role: "user",
+          text: "first route",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+    await waitFor(() => harness.startSession.mock.calls.length === 1);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    await harness.emitRuntimeEvent({
+      type: "turn.completed",
+      eventId: asEventId("evt-route-a-completed"),
+      provider: "codex",
+      threadId,
+      createdAt: new Date().toISOString(),
+      turnId: asTurnId("turn-1"),
+      payload: { state: "completed" },
+      providerRefs: {},
+    } as ProviderRuntimeEvent);
+    await Effect.runPromise(
+      harness.serverSettings.updateSettings({
+        providers: { codex: { profile: "route-b" } },
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-route-b-turn"),
+        threadId,
+        message: {
+          messageId: asMessageId("user-message-route-b"),
+          role: "user",
+          text: "second route",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: new Date().toISOString(),
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 2);
+    expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
+      providerOptions: { codex: { homePath: codexHome, profile: "route-b" } },
+    });
+    expect(harness.startSession.mock.calls[1]?.[1]).not.toHaveProperty("resumeCursor");
   });
 
   it("forwards codex model options through session start and turn send", async () => {

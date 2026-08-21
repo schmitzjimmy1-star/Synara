@@ -11412,6 +11412,8 @@ export default function ChatView({
       <ProviderHealthBanner
         status={shouldShowProviderHealthBanner ? visibleActiveProviderStatus : null}
         onDismiss={dismissActiveProviderHealthBanner}
+        onRetry={() => void refreshProviderStatuses()}
+        onOpenSettings={() => void navigate({ to: "/settings", search: { section: "providers" } })}
       />
       <RateLimitBanner
         rateLimitStatus={visibleActiveRateLimitStatus}

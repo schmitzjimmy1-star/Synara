@@ -28,6 +28,7 @@ import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnap
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor";
 import { reconcileRestartStuckTurns } from "./orchestration/startupTurnReconciliation";
 import { ProviderSessionReaper } from "./provider/Services/ProviderSessionReaper";
+import { ProviderHealth } from "./provider/Services/ProviderHealth";
 import { ProviderRuntimeReconciler } from "./provider/Services/ProviderRuntimeReconciler";
 import { ProviderService, type ProviderServiceShape } from "./provider/Services/ProviderService";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents";
@@ -54,6 +55,7 @@ export interface ServerShape {
     | OrchestrationReactor
     | ProjectionSnapshotQuery
     | ProviderSessionReaper
+    | ProviderHealth
     | ProviderRuntimeReconciler
     | ProviderService
     | ServerRuntimeStartup
@@ -111,6 +113,7 @@ export const createEffectServer = Effect.fn(function* (
   const orchestrationEngine = yield* OrchestrationEngineService;
   const orchestrationReactor = yield* OrchestrationReactor;
   const providerService = yield* ProviderService;
+  const providerHealth = yield* ProviderHealth;
   const providerSessionReaper = yield* ProviderSessionReaper;
   const providerRuntimeReconciler = yield* ProviderRuntimeReconciler;
   const runtimeStartup = yield* ServerRuntimeStartup;
@@ -128,6 +131,9 @@ export const createEffectServer = Effect.fn(function* (
     ),
   );
   yield* serverSettings.start;
+  // Provider layers are constructed before persisted settings are hydrated. Refresh here so
+  // the first websocket snapshot can never publish a probe made with default settings.
+  yield* providerHealth.refresh;
   yield* readiness.markPushBusReady;
   yield* readiness.markKeybindingsReady;
 

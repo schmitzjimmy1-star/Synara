@@ -108,7 +108,8 @@ const ALL_PROVIDER_INSTALL_SETTINGS: readonly ProviderInstallSettings[] = [
         placeholder: "Codex binary path",
         description: (
           <>
-            Leave blank to use <code>codex</code> from your PATH.
+            Leave blank to use <code>codex</code> from your PATH. On macOS, Synara can also use the
+            verified official ChatGPT or Codex app bundle.
           </>
         ),
       },
@@ -127,8 +128,9 @@ const ALL_PROVIDER_INSTALL_SETTINGS: readonly ProviderInstallSettings[] = [
         placeholder: "openrouter",
         description: (
           <>
-            Optional profile layered from <code>$CODEX_HOME/&lt;name&gt;.config.toml</code>. Use{" "}
-            <code>openrouter</code> for OpenRouter inference without isolating MCPs.
+            Optional profile layered from <code>$CODEX_HOME/&lt;name&gt;.config.toml</code>. A
+            Responses-compatible cloud profile such as <code>openrouter</code> keeps Codex&apos;s
+            existing MCPs, plugins, and skills.
           </>
         ),
       },

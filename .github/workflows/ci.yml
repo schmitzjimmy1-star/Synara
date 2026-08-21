@@ -140,7 +140,11 @@ jobs:
       - name: Install dependencies
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
-        run: bun install --frozen-lockfile
+        # Workspace prepare hooks patch the shared TypeScript installation and
+        # can race each other on Windows. This job runs runtime regressions,
+        # not Effect language-service diagnostics; the PTY smoke below remains
+        # the explicit native-dependency acceptance check.
+        run: bun install --frozen-lockfile --ignore-scripts
 
       - name: Verify Windows terminal PTY native dependency under Bun
         run: bun scripts/node-pty-smoke.mjs

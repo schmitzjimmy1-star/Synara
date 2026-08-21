@@ -35,6 +35,7 @@ import {
 } from "@synara/contracts";
 import { prewarmChatGptVoiceTranscriptionConnection } from "@synara/shared/chatGptVoiceTranscription";
 import { buildSynaraAgentBrowserEnvironment } from "@synara/shared/agentBrowser";
+import { resolveCodexBinary } from "@synara/shared/codexBinary";
 import { getModelSelectionBooleanOptionValue, normalizeModelSlug } from "@synara/shared/model";
 import { decodeSubagentReceiverThreadIds } from "@synara/shared/subagents";
 import { prepareWindowsSafeProcess } from "@synara/shared/windowsProcess";
@@ -49,7 +50,7 @@ import {
 } from "./provider/codexCliVersion";
 import { AGENT_GATEWAY_TURN_AUTHORITY_RETIRED } from "./agentGateway/sessionLease.ts";
 import { isNonFatalCodexErrorMessage } from "./codexErrorClassification.ts";
-import { buildCodexProcessEnv } from "./codexProcessEnv.ts";
+import { buildCodexProcessEnv, resolveCodexRouteIdentity } from "./codexProcessEnv.ts";
 import { assertCodexWorkingDirectoryExists } from "./codexWorkingDirectory.ts";
 import { executableIdentity, resolveExecutable } from "./executableLookup.ts";
 import {
@@ -179,6 +180,7 @@ interface CodexSessionContext {
   stopping: boolean;
   stopPromise?: Promise<void>;
   discovery?: boolean;
+  discoveryKey?: string;
 }
 
 interface CodexSkillListInput {
@@ -305,13 +307,6 @@ const BENIGN_ERROR_LOG_SNIPPETS = [
   "state db record_discrepancy: find_thread_path_by_id_str_in_subdir, falling_back",
 ];
 const BENIGN_PROCESS_OUTPUT_REGEXES = [/^(?:\^C)?Token usage:/i];
-const RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS = [
-  "not found",
-  "missing thread",
-  "no such thread",
-  "unknown thread",
-  "does not exist",
-];
 const CODEX_DEFAULT_MODEL = "gpt-5.5";
 const CODEX_SPARK_MODEL = "gpt-5.3-codex-spark";
 const CODEX_SPARK_DISABLED_PLAN_TYPES = new Set<CodexPlanType>(["free", "go", "plus"]);
@@ -873,15 +868,6 @@ export function classifyCodexStderrLine(rawLine: string): { message: string } | 
   return { message: normalizeCodexUserVisibleErrorMessage(line) };
 }
 
-export function isRecoverableThreadResumeError(error: unknown): boolean {
-  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
-  if (!message.includes("thread/resume")) {
-    return false;
-  }
-
-  return RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS.some((snippet) => message.includes(snippet));
-}
-
 export function formatCodexThreadResumeError(error: unknown, providerThreadId: string): Error {
   const originalError = error instanceof Error ? error : new Error(String(error));
   if (!originalError.message.toLowerCase().includes("already has an active writer")) {
@@ -988,6 +974,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       }
 
       const resolvedCwd = resolveScratchWorkspaceCwd(threadId, input.cwd);
+      const codexOptions = readCodexProviderOptions(input);
 
       const session: ProviderSession = {
         provider: "codex",
@@ -995,15 +982,22 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         runtimeMode: input.runtimeMode,
         model: normalizeCodexModelSlug(input.model),
         cwd: resolvedCwd,
+        ...(codexOptions.routeFingerprint
+          ? { providerConfigFingerprint: codexOptions.routeFingerprint }
+          : {}),
         threadId,
         createdAt: now,
         updatedAt: now,
       };
 
-      const codexOptions = readCodexProviderOptions(input);
-      const codexBinaryPath = codexOptions.binaryPath ?? "codex";
+      const configuredCodexBinaryPath = codexOptions.binaryPath ?? "codex";
       const codexHomePath = codexOptions.homePath;
       const codexProfile = codexOptions.profile;
+      const processEnv = await this.buildSessionProcessEnv(threadId, codexHomePath, codexProfile);
+      const codexBinaryPath = resolveCodexBinary({
+        configuredPath: configuredCodexBinaryPath,
+        env: processEnv,
+      }).path;
       await this.assertSupportedCodexCliVersion({
         binaryPath: codexBinaryPath,
         cwd: resolvedCwd,
@@ -1015,7 +1009,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       const child = spawnCodexAppServer({
         binaryPath: codexBinaryPath,
         cwd: resolvedCwd,
-        env: await this.buildSessionProcessEnv(threadId, codexHomePath, codexProfile),
+        env: processEnv,
       });
 
       context = {
@@ -1102,7 +1096,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         forkSourceThreadId: forkSourceThreadId ?? null,
       }).pipe(this.runPromise);
 
-      let threadOpenMethod = threadOpenRequest.method;
+      const threadOpenMethod = threadOpenRequest.method;
       let threadOpenResponse: unknown;
       try {
         threadOpenResponse = await this.sendRequest(
@@ -1111,54 +1105,30 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
           threadOpenRequest.params,
         );
       } catch (error) {
-        const recoverableResumeFailure =
-          threadOpenRequest.method === "thread/resume" && isRecoverableThreadResumeError(error);
-        if (!recoverableResumeFailure) {
-          const threadOpenError =
-            threadOpenRequest.method === "thread/resume" && resumeThreadId
-              ? formatCodexThreadResumeError(error, resumeThreadId)
-              : error instanceof Error
-                ? error
-                : new Error(String(error));
-          this.emitErrorEvent(
-            context,
-            threadOpenRequest.method === "thread/fork"
-              ? "session/threadForkFailed"
-              : threadOpenRequest.method === "thread/resume"
-                ? "session/threadResumeFailed"
-                : "session/threadStartFailed",
-            threadOpenError.message,
-          );
-          await Effect.logWarning(`codex app-server ${threadOpenRequest.method} failed`, {
-            threadId,
-            requestedRuntimeMode: input.runtimeMode,
-            resumeThreadId: resumeThreadId ?? null,
-            forkSourceThreadId: forkSourceThreadId ?? null,
-            recoverable: false,
-            cause: threadOpenError.message,
-          }).pipe(this.runPromise);
-          throw threadOpenError;
-        }
-
-        threadOpenMethod = "thread/start";
-        this.emitLifecycleEvent(
+        const threadOpenError =
+          threadOpenRequest.method === "thread/resume" && resumeThreadId
+            ? formatCodexThreadResumeError(error, resumeThreadId)
+            : error instanceof Error
+              ? error
+              : new Error(String(error));
+        this.emitErrorEvent(
           context,
-          "session/threadResumeFallback",
-          `Could not resume thread ${resumeThreadId}; started a new thread instead.`,
+          threadOpenRequest.method === "thread/fork"
+            ? "session/threadForkFailed"
+            : threadOpenRequest.method === "thread/resume"
+              ? "session/threadResumeFailed"
+              : "session/threadStartFailed",
+          threadOpenError.message,
         );
-        await Effect.logWarning("codex app-server thread resume fell back to fresh start", {
+        await Effect.logWarning(`codex app-server ${threadOpenRequest.method} failed`, {
           threadId,
           requestedRuntimeMode: input.runtimeMode,
-          resumeThreadId,
-          recoverable: true,
-          cause: error instanceof Error ? error.message : String(error),
+          resumeThreadId: resumeThreadId ?? null,
+          forkSourceThreadId: forkSourceThreadId ?? null,
+          recoverable: false,
+          cause: threadOpenError.message,
         }).pipe(this.runPromise);
-        const fallbackRequest = buildCodexThreadOpenRequest({ sessionOverrides });
-        threadOpenResponse = await this.sendRequest(
-          context,
-          fallbackRequest.method,
-          fallbackRequest.params,
-        );
+        throw threadOpenError;
       }
 
       const threadOpenRecord = this.readObject(threadOpenResponse);
@@ -1779,9 +1749,14 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         runtimeMode: input.runtimeMode,
         ...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
       });
-      const codexBinaryPath = codexOptions.binaryPath ?? "codex";
+      const configuredCodexBinaryPath = codexOptions.binaryPath ?? "codex";
       const codexHomePath = codexOptions.homePath;
       const codexProfile = codexOptions.profile;
+      const processEnv = await this.buildSessionProcessEnv(threadId, codexHomePath, codexProfile);
+      const codexBinaryPath = resolveCodexBinary({
+        configuredPath: configuredCodexBinaryPath,
+        env: processEnv,
+      }).path;
       await this.assertSupportedCodexCliVersion({
         binaryPath: codexBinaryPath,
         cwd: resolvedCwd,
@@ -1793,7 +1768,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       const child = spawnCodexAppServer({
         binaryPath: codexBinaryPath,
         cwd: resolvedCwd,
-        env: await this.buildSessionProcessEnv(threadId, codexHomePath, codexProfile),
+        env: processEnv,
       });
 
       context = {
@@ -2417,12 +2392,17 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
   ): Promise<ProviderListModelsResult> {
     const input =
       typeof inputOrThreadId === "string" ? { threadId: inputOrThreadId } : inputOrThreadId;
+    const routeIdentity = resolveCodexRouteIdentity({
+      ...(input.homePath?.trim() ? { homePath: input.homePath.trim() } : {}),
+      ...(input.profile?.trim() ? { profile: input.profile.trim() } : {}),
+    });
     const cacheKey = JSON.stringify({
       threadId: input.threadId?.trim() || null,
       cwd: input.cwd?.trim() || null,
       binaryPath: input.binaryPath?.trim() || "codex",
       homePath: input.homePath?.trim() || null,
       profile: input.profile?.trim() || null,
+      routeFingerprint: routeIdentity.fingerprint,
     });
     const cached = getRecentCacheEntry(this.modelCache, cacheKey);
     if (cached && Date.now() - cached.cachedAt <= CODEX_MODEL_DISCOVERY_CACHE_TTL_MS) {
@@ -2706,6 +2686,10 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     profile?: string,
   ): Promise<CodexSessionContext> {
     const normalizedCwd = cwd.trim() || process.cwd();
+    const routeIdentity = resolveCodexRouteIdentity({
+      ...(homePath?.trim() ? { homePath: homePath.trim() } : {}),
+      ...(profile?.trim() ? { profile: profile.trim() } : {}),
+    });
     const discoveryKey =
       binaryPath?.trim() || homePath?.trim() || profile?.trim()
         ? JSON.stringify({
@@ -2713,6 +2697,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
             binaryPath: binaryPath?.trim() || "codex",
             homePath: homePath?.trim() || null,
             profile: profile?.trim() || null,
+            routeFingerprint: routeIdentity.fingerprint,
           })
         : normalizedCwd;
     const startup = this.discoverySessionStartups.get(discoveryKey);
@@ -2760,18 +2745,23 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     }
 
     const now = new Date().toISOString();
+    const processEnv = await buildCodexProcessEnv({
+      ...(homePath?.trim() ? { homePath: homePath.trim() } : {}),
+      ...(profile?.trim() ? { profile: profile.trim() } : {}),
+    });
+    const codexBinaryPath = resolveCodexBinary({
+      configuredPath: binaryPath?.trim() || "codex",
+      env: processEnv,
+    }).path;
     await this.assertSupportedCodexCliVersion({
-      binaryPath: binaryPath?.trim() || "codex",
+      binaryPath: codexBinaryPath,
       cwd: normalizedCwd,
       ...(homePath?.trim() ? { homePath: homePath.trim() } : {}),
     });
     const child = spawnCodexAppServer({
-      binaryPath: binaryPath?.trim() || "codex",
+      binaryPath: codexBinaryPath,
       cwd: normalizedCwd,
-      env: await buildCodexProcessEnv({
-        ...(homePath?.trim() ? { homePath: homePath.trim() } : {}),
-        ...(profile?.trim() ? { profile: profile.trim() } : {}),
-      }),
+      env: processEnv,
     });
     const context: CodexSessionContext = {
       session: {
@@ -2801,6 +2791,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       nextRequestId: 1,
       stopping: false,
       discovery: true,
+      discoveryKey,
     };
 
     this.discoverySessions.set(discoveryKey, context);
@@ -2973,9 +2964,16 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       });
       this.emitLifecycleEvent(context, "session/exited", message);
       if (context.discovery) {
-        const discoveryKey = context.session.cwd ?? "";
+        const discoveryKey = context.discoveryKey ?? "";
         if (discoveryKey) {
-          this.discoverySessions.delete(discoveryKey);
+          const idleTimer = this.discoverySessionIdleTimers.get(discoveryKey);
+          if (idleTimer) {
+            clearTimeout(idleTimer);
+            this.discoverySessionIdleTimers.delete(discoveryKey);
+          }
+          if (this.discoverySessions.get(discoveryKey) === context) {
+            this.discoverySessions.delete(discoveryKey);
+          }
         }
       } else {
         this.sessions.delete(context.session.threadId);
@@ -2995,7 +2993,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     this.emitErrorEvent(context, "protocol/transportError", message);
 
     const stopping = context.discovery
-      ? this.stopDiscoverySession(context.session.cwd ?? "")
+      ? this.stopDiscoverySession(context.discoveryKey ?? "")
       : this.stopSession(context.session.threadId);
     void stopping.catch((stopError) => {
       log.error("failed to stop Codex session after transport error", {
@@ -4047,6 +4045,7 @@ function readCodexProviderOptions(input: CodexAppServerStartSessionInput): {
   readonly binaryPath?: string;
   readonly homePath?: string;
   readonly profile?: string;
+  readonly routeFingerprint?: string;
 } {
   const options = input.providerOptions?.codex;
   if (!options) {
@@ -4056,6 +4055,7 @@ function readCodexProviderOptions(input: CodexAppServerStartSessionInput): {
     ...(options.binaryPath ? { binaryPath: options.binaryPath } : {}),
     ...(options.homePath ? { homePath: options.homePath } : {}),
     ...(options.profile ? { profile: options.profile } : {}),
+    ...(options.routeFingerprint ? { routeFingerprint: options.routeFingerprint } : {}),
   };
 }
 

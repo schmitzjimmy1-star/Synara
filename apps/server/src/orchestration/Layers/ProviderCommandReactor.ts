@@ -16,7 +16,6 @@ import {
   type ProviderInteractionMode,
   type ProviderRuntimeEvent,
   ProviderKind,
-  OPENROUTER_CODEX_DEFAULT_MODEL,
   type ProviderReviewTarget,
   type ProviderStartOptions,
   type ProviderSkillReference,
@@ -60,6 +59,7 @@ import {
 } from "@synara/shared/providerDeliveryBlock";
 import { buildStalePendingRequestFailureDetail } from "@synara/shared/threadSummary";
 import { resolveThreadWorkspaceState } from "@synara/shared/threadEnvironment";
+import { resolveCodexRouteIdentity } from "../../codexProcessEnv.ts";
 
 import {
   checkpointRefForThreadMessageStart,
@@ -1175,28 +1175,13 @@ const make = Effect.gen(function* () {
     const threadProvider: ProviderKind = "codex";
     const preferredProvider: ProviderKind = "codex";
     const settingsSnapshot = yield* serverSettings.getSnapshot;
-    const openRouterProfileActive =
-      settingsSnapshot.settings.providers.codex.homePath.trim().length > 0 &&
-      settingsSnapshot.settings.providers.codex.customModels.includes(
-        OPENROUTER_CODEX_DEFAULT_MODEL,
-      );
-    const fallbackCodexModel = openRouterProfileActive
-      ? OPENROUTER_CODEX_DEFAULT_MODEL
-      : DEFAULT_MODEL_BY_PROVIDER.codex;
-    const normalizeCodexSelection = (
-      selection: ModelSelection | undefined,
-    ): ModelSelection | undefined =>
-      selection?.provider === "codex" && openRouterProfileActive && !selection.model.includes("/")
-        ? { ...selection, model: OPENROUTER_CODEX_DEFAULT_MODEL }
-        : selection;
-    const requestedModelSelection = normalizeCodexSelection(
-      options?.modelSelection?.provider === "codex" ? options.modelSelection : undefined,
-    );
+    const requestedModelSelection =
+      options?.modelSelection?.provider === "codex" ? options.modelSelection : undefined;
     const desiredModelSelection: ModelSelection =
       requestedModelSelection ??
       (thread.modelSelection.provider === "codex"
-        ? normalizeCodexSelection(thread.modelSelection)!
-        : { provider: "codex", model: fallbackCodexModel });
+        ? thread.modelSelection
+        : { provider: "codex", model: DEFAULT_MODEL_BY_PROVIDER.codex });
     const shouldRegisterContextBootstrap =
       !retiredProviderBinding &&
       thread.session?.status !== "stopped" &&
@@ -1211,6 +1196,23 @@ const make = Effect.gen(function* () {
     const resolvedProviderOptions = providerStartOptionsFromServerSettings(
       settingsSnapshot.settings,
     );
+    const codexRouteIdentity = yield* Effect.sync(() =>
+      resolveCodexRouteIdentity({
+        ...(resolvedProviderOptions.codex?.homePath
+          ? { homePath: resolvedProviderOptions.codex.homePath }
+          : {}),
+        ...(resolvedProviderOptions.codex?.profile
+          ? { profile: resolvedProviderOptions.codex.profile }
+          : {}),
+      }),
+    );
+    const pinnedProviderOptions: ProviderStartOptions = {
+      ...resolvedProviderOptions,
+      codex: {
+        ...resolvedProviderOptions.codex,
+        routeFingerprint: codexRouteIdentity.fingerprint,
+      },
+    };
     const effectiveCwd = yield* resolveProjectedThreadWorkspaceCwd(thread);
     const workspaceState = resolveThreadWorkspaceState({
       envMode: thread.envMode,
@@ -1227,7 +1229,7 @@ const make = Effect.gen(function* () {
       threadId,
       ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
       modelSelection: desiredModelSelection,
-      providerOptions: resolvedProviderOptions,
+      providerOptions: pinnedProviderOptions,
       runtimeMode: desiredRuntimeMode,
     };
 
@@ -1283,6 +1285,14 @@ const make = Effect.gen(function* () {
         requestedModelSelection.model !== activeSessionBeforeEnsure?.model;
       const shouldRestartForModelChange = modelChanged && sessionModelSwitch === "restart-session";
       const previousModelSelection = threadSessionModelSelections.get(threadId);
+      const customRouteConfigured = Boolean(
+        resolvedProviderOptions.codex?.homePath || resolvedProviderOptions.codex?.profile,
+      );
+      const previousRouteFingerprint = activeSessionBeforeEnsure?.providerConfigFingerprint;
+      const routeChanged =
+        previousRouteFingerprint !== undefined
+          ? previousRouteFingerprint !== codexRouteIdentity.fingerprint
+          : customRouteConfigured;
       const shouldRestartForModelSelectionChange =
         requestedModelSelection !== undefined &&
         previousModelSelection !== undefined &&
@@ -1292,6 +1302,7 @@ const make = Effect.gen(function* () {
       if (
         !runtimeModeChanged &&
         !providerChanged &&
+        !routeChanged &&
         !shouldRestartForModelChange &&
         !shouldRestartForModelSelectionChange
       ) {
@@ -1302,7 +1313,7 @@ const make = Effect.gen(function* () {
       }
 
       const resumeCursor =
-        providerChanged || shouldRestartForModelChange || runtimeModeChanged
+        providerChanged || routeChanged || shouldRestartForModelChange || runtimeModeChanged
           ? undefined
           : (activeSessionBeforeEnsure?.resumeCursor ?? undefined);
       yield* Effect.logInfo("provider command reactor restarting provider session", {
@@ -1314,11 +1325,15 @@ const make = Effect.gen(function* () {
         desiredRuntimeMode,
         runtimeModeChanged,
         providerChanged,
+        routeChanged,
         modelChanged,
         shouldRestartForModelChange,
         shouldRestartForModelSelectionChange,
         hasResumeCursor: resumeCursor !== undefined,
       });
+      if (routeChanged && shouldRegisterContextBootstrap && !thread.sidechatSourceThreadId) {
+        freshSessionContextBootstrapThreadIds.add(threadId);
+      }
       const restartedSession = yield* startProviderSession(resumeCursor);
       threadSessionModelSelections.set(threadId, desiredModelSelection);
       yield* Effect.logInfo("provider command reactor restarted provider session", {

@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import {
+  chmodSync,
+  existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -25,7 +27,6 @@ import {
   CodexAppServerManager,
   classifyCodexStderrLine,
   formatCodexThreadResumeError,
-  isRecoverableThreadResumeError,
   normalizeCodexModelSlug,
   readCodexAccountSnapshot,
   resolveCodexModelForAccount,
@@ -933,6 +934,8 @@ describe("buildCodexProcessEnv", () => {
         env: {
           SHELL: "/bin/zsh",
           PATH: "/usr/bin",
+          OPENAI_API_KEY: "unrelated-openai-secret",
+          ANTHROPIC_API_KEY: "unrelated-anthropic-secret",
         },
         homePath: tempDir,
         platform: "darwin",
@@ -946,6 +949,8 @@ describe("buildCodexProcessEnv", () => {
       ]);
       expect(env.CODEX_HOME).toBe(tempDir);
       expect(env.MY_COMPANY_PROXY_KEY).toBe("proxy-secret");
+      expect(env.OPENAI_API_KEY).toBeUndefined();
+      expect(env.ANTHROPIC_API_KEY).toBeUndefined();
       expect(env.PATH).toBe("/opt/homebrew/bin:/usr/bin");
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
@@ -953,21 +958,38 @@ describe("buildCodexProcessEnv", () => {
   });
 
   it("does not read shell env when the provider key is already present", async () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), "synara-codex-env-present-"));
     const readEnvironment = vi.fn();
+    try {
+      writeFileSync(
+        path.join(tempDir, "config.toml"),
+        [
+          'model_provider = "azure"',
+          "[model_providers.azure]",
+          'base_url = "https://azure.example.test/openai"',
+          'env_key = "AZURE_OPENAI_API_KEY"',
+        ].join("\n"),
+        "utf8",
+      );
 
-    const env = await buildCodexProcessEnv({
-      env: {
-        SHELL: "/bin/zsh",
-        PATH: "/usr/bin",
-        CODEX_HOME: "/tmp/.codex",
-        AZURE_OPENAI_API_KEY: "existing-secret",
-      },
-      platform: "darwin",
-      readEnvironment,
-    });
+      const env = await buildCodexProcessEnv({
+        env: {
+          SHELL: "/bin/zsh",
+          PATH: "/usr/bin",
+          CODEX_HOME: tempDir,
+          AZURE_OPENAI_API_KEY: "existing-secret",
+          ANTHROPIC_API_KEY: "unrelated-secret",
+        },
+        platform: "darwin",
+        readEnvironment,
+      });
 
-    expect(readEnvironment).not.toHaveBeenCalled();
-    expect(env.AZURE_OPENAI_API_KEY).toBe("existing-secret");
+      expect(readEnvironment).not.toHaveBeenCalled();
+      expect(env.AZURE_OPENAI_API_KEY).toBe("existing-secret");
+      expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   it("keeps the private desktop browser host out of the Codex process", async () => {
@@ -1228,28 +1250,6 @@ describe("normalizeCodexModelSlug", () => {
   });
 });
 
-describe("isRecoverableThreadResumeError", () => {
-  it("matches not-found resume errors", () => {
-    expect(
-      isRecoverableThreadResumeError(new Error("thread/resume failed: thread not found")),
-    ).toBe(true);
-  });
-
-  it("ignores non-resume errors", () => {
-    expect(
-      isRecoverableThreadResumeError(new Error("thread/start failed: permission denied")),
-    ).toBe(false);
-  });
-
-  it("ignores non-recoverable resume errors", () => {
-    expect(
-      isRecoverableThreadResumeError(
-        new Error("thread/resume failed: timed out waiting for server"),
-      ),
-    ).toBe(false);
-  });
-});
-
 describe("buildCodexThreadOpenRequest", () => {
   const sessionOverrides = {
     model: null,
@@ -1325,6 +1325,64 @@ describe("formatCodexThreadResumeError", () => {
   it("preserves unrelated resume errors", () => {
     const original = new Error("thread/resume failed: permission denied");
     expect(formatCodexThreadResumeError(original, "external-thread")).toBe(original);
+  });
+});
+
+describe("startSession resume failure", () => {
+  it("fails closed instead of silently starting a fresh Codex thread", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "synara-resume-fail-closed-"));
+    const binaryPath = path.join(root, "codex");
+    const startMarkerPath = path.join(root, "thread-start-called");
+    writeFileSync(
+      binaryPath,
+      `#!${process.execPath}
+const fs = require("node:fs");
+const readline = require("node:readline");
+if (process.argv.includes("--version")) {
+  process.stdout.write("codex-cli 0.149.0\\n");
+  process.exit(0);
+}
+const lines = readline.createInterface({ input: process.stdin });
+lines.on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.id === undefined) return;
+  if (message.method === "thread/resume") {
+    process.stdout.write(JSON.stringify({ id: message.id, error: { code: -32000, message: "thread not found" } }) + "\\n");
+    return;
+  }
+  if (message.method === "thread/start") {
+    fs.writeFileSync(${JSON.stringify(startMarkerPath)}, "called");
+    process.stdout.write(JSON.stringify({ id: message.id, result: { thread: { id: "fresh-thread" } } }) + "\\n");
+    return;
+  }
+  const result = message.method === "account/read" ? { type: "apiKey" } : {};
+  process.stdout.write(JSON.stringify({ id: message.id, result }) + "\\n");
+});
+`,
+    );
+    chmodSync(binaryPath, 0o755);
+
+    const manager = new CodexAppServerManager();
+    const methods: string[] = [];
+    manager.on("event", (event) => methods.push(event.method));
+    try {
+      await expect(
+        manager.startSession({
+          threadId: asThreadId("synara-thread"),
+          provider: "codex",
+          runtimeMode: "full-access",
+          cwd: root,
+          resumeCursor: { threadId: "missing-provider-thread" },
+          providerOptions: { codex: { binaryPath } },
+        }),
+      ).rejects.toThrow("thread/resume failed: thread not found");
+      expect(existsSync(startMarkerPath)).toBe(false);
+      expect(methods).toContain("session/threadResumeFailed");
+      expect(methods).not.toContain("session/threadResumeFallback");
+    } finally {
+      await manager.stopAll();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 
@@ -1510,6 +1568,11 @@ describe("startSession", () => {
           threadId: asThreadId("thread-1"),
           provider: "codex",
           runtimeMode: "full-access",
+          providerOptions: {
+            codex: {
+              binaryPath: process.execPath,
+            },
+          },
         }),
       ).rejects.toThrow(
         "Codex CLI v0.36.0 is too old for Synara. Upgrade to v0.37.0 or newer and restart Synara.",
@@ -1554,6 +1617,11 @@ describe("startSession", () => {
           threadId: asThreadId("thread-auto-version"),
           provider: "codex",
           runtimeMode: "auto",
+          providerOptions: {
+            codex: {
+              binaryPath: process.execPath,
+            },
+          },
         }),
       ).rejects.toThrow("Codex Auto version gate");
       expect(versionCheck).toHaveBeenCalledTimes(1);
@@ -1965,6 +2033,37 @@ describe("steerTurn", () => {
 });
 
 describe("CodexAppServerManager discovery", () => {
+  it("invalidates the model cache when a profile changes in place", async () => {
+    const homePath = mkdtempSync(path.join(os.tmpdir(), "synara-model-route-"));
+    const profilePath = path.join(homePath, "custom.config.toml");
+    writeFileSync(path.join(homePath, "config.toml"), 'model_provider = "openai"\n', "utf8");
+    writeFileSync(profilePath, 'model_provider = "acme"\n', "utf8");
+    const manager = new CodexAppServerManager();
+    const context = { session: { status: "ready" } };
+    vi.spyOn(
+      manager as unknown as { resolveContextForDiscovery: () => unknown },
+      "resolveContextForDiscovery",
+    ).mockReturnValue(context);
+    const sendRequest = vi
+      .spyOn(
+        manager as unknown as { sendRequest: (...args: unknown[]) => Promise<unknown> },
+        "sendRequest",
+      )
+      .mockResolvedValue({ result: { items: [] } });
+
+    try {
+      await manager.listModels({ homePath, profile: "custom" });
+      await manager.listModels({ homePath, profile: "custom" });
+      expect(sendRequest).toHaveBeenCalledTimes(1);
+
+      writeFileSync(profilePath, 'model_provider = "other"\n', "utf8");
+      await manager.listModels({ homePath, profile: "custom" });
+      expect(sendRequest).toHaveBeenCalledTimes(2);
+    } finally {
+      rmSync(homePath, { recursive: true, force: true });
+    }
+  });
+
   it("wires model discovery through model/list", async () => {
     const manager = new CodexAppServerManager();
     const context = {
