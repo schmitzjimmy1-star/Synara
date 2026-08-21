@@ -934,6 +934,8 @@ describe("buildCodexProcessEnv", () => {
         env: {
           SHELL: "/bin/zsh",
           PATH: "/usr/bin",
+          OPENAI_API_KEY: "unrelated-openai-secret",
+          ANTHROPIC_API_KEY: "unrelated-anthropic-secret",
         },
         homePath: tempDir,
         platform: "darwin",
@@ -947,6 +949,8 @@ describe("buildCodexProcessEnv", () => {
       ]);
       expect(env.CODEX_HOME).toBe(tempDir);
       expect(env.MY_COMPANY_PROXY_KEY).toBe("proxy-secret");
+      expect(env.OPENAI_API_KEY).toBeUndefined();
+      expect(env.ANTHROPIC_API_KEY).toBeUndefined();
       expect(env.PATH).toBe("/opt/homebrew/bin:/usr/bin");
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
@@ -954,21 +958,38 @@ describe("buildCodexProcessEnv", () => {
   });
 
   it("does not read shell env when the provider key is already present", async () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), "synara-codex-env-present-"));
     const readEnvironment = vi.fn();
+    try {
+      writeFileSync(
+        path.join(tempDir, "config.toml"),
+        [
+          'model_provider = "azure"',
+          "[model_providers.azure]",
+          'base_url = "https://azure.example.test/openai"',
+          'env_key = "AZURE_OPENAI_API_KEY"',
+        ].join("\n"),
+        "utf8",
+      );
 
-    const env = await buildCodexProcessEnv({
-      env: {
-        SHELL: "/bin/zsh",
-        PATH: "/usr/bin",
-        CODEX_HOME: "/tmp/.codex",
-        AZURE_OPENAI_API_KEY: "existing-secret",
-      },
-      platform: "darwin",
-      readEnvironment,
-    });
+      const env = await buildCodexProcessEnv({
+        env: {
+          SHELL: "/bin/zsh",
+          PATH: "/usr/bin",
+          CODEX_HOME: tempDir,
+          AZURE_OPENAI_API_KEY: "existing-secret",
+          ANTHROPIC_API_KEY: "unrelated-secret",
+        },
+        platform: "darwin",
+        readEnvironment,
+      });
 
-    expect(readEnvironment).not.toHaveBeenCalled();
-    expect(env.AZURE_OPENAI_API_KEY).toBe("existing-secret");
+      expect(readEnvironment).not.toHaveBeenCalled();
+      expect(env.AZURE_OPENAI_API_KEY).toBe("existing-secret");
+      expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   it("keeps the private desktop browser host out of the Codex process", async () => {

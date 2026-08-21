@@ -14,6 +14,7 @@ import type {
   ProviderForkThreadResult,
   ProviderRuntimeEvent,
   ProviderSession,
+  ServerSettings,
 } from "@synara/contracts";
 import {
   ApprovalRequestId,
@@ -210,6 +211,7 @@ describe("ProviderCommandReactor", () => {
     readonly commandEventTimeout?: Duration.Duration;
     readonly gatewayOperationId?: string;
     readonly gitWritingModelSelection?: ModelSelection;
+    readonly codexProviderSettings?: Partial<ServerSettings["providers"]["codex"]>;
   }) {
     const now = new Date().toISOString();
     const baseDir = input?.baseDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "synara-reactor-"));
@@ -525,9 +527,14 @@ describe("ProviderCommandReactor", () => {
       ),
       Layer.provideMerge(
         ServerSettingsService.layerTest(
-          input?.gitWritingModelSelection
-            ? { textGenerationModelSelection: input.gitWritingModelSelection }
-            : {},
+          {
+            ...(input?.gitWritingModelSelection
+              ? { textGenerationModelSelection: input.gitWritingModelSelection }
+              : {}),
+            ...(input?.codexProviderSettings
+              ? { providers: { codex: input.codexProviderSettings } }
+              : {}),
+          },
         ),
       ),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), baseDir)),
@@ -6968,6 +6975,80 @@ describe("ProviderCommandReactor", () => {
       threadId: ThreadId.makeUnsafe("thread-1"),
       input: "switch directions",
     });
+  });
+
+  it("preserves a slashless Codex model when OpenRouter models are configured", async () => {
+    const harness = await createHarness({
+      codexProviderSettings: {
+        homePath: "/tmp/codex-openrouter",
+        customModels: ["openai/gpt-5.6-sol"],
+      },
+    });
+    const modelSelection: ModelSelection = {
+      provider: "codex",
+      model: "gpt-5.6-sol",
+    };
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-slashless-codex-model"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-slashless-codex-model"),
+          role: "user",
+          text: "keep the exact selected model",
+          attachments: [],
+        },
+        modelSelection,
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 1);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({ modelSelection });
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({ modelSelection });
+  });
+
+  it("preserves the thread's slashless Codex model when a turn omits a selection", async () => {
+    const modelSelection: ModelSelection = {
+      provider: "codex",
+      model: "gpt-5.6-sol",
+    };
+    const harness = await createHarness({
+      threadModelSelection: modelSelection,
+      codexProviderSettings: {
+        homePath: "/tmp/codex-openrouter",
+        customModels: ["openai/gpt-5.6-sol"],
+      },
+    });
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-thread-slashless-codex-model"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-thread-slashless-codex-model"),
+          role: "user",
+          text: "keep the thread's selected model",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 1);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({ modelSelection });
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({ modelSelection });
   });
 
   it("forwards codex model options through session start and turn send", async () => {

@@ -59,7 +59,7 @@ const PROVIDER_CREDENTIAL_GRANTS: Record<ProviderChildKind, "all" | ReadonlySet<
   grok: new Set(["XAI_API_KEY", "GROK_CODE_XAI_API_KEY"]),
   // These profiles deliberately support arbitrary upstream model providers.
   acp: "all",
-  codex: "all",
+  codex: new Set(["OPENAI_API_KEY"]),
   kilo: "all",
   opencode: "all",
   pi: "all",
@@ -81,6 +81,7 @@ export function buildProviderChildEnvironment(input: {
   readonly baseEnv?: NodeJS.ProcessEnv;
   readonly inheritedSynaraKeys?: ReadonlyArray<string>;
   readonly inheritedNativeCapabilityKeys?: ReadonlyArray<string>;
+  readonly credentialKeys?: ReadonlyArray<string>;
   readonly overrides?: NodeJS.ProcessEnv;
 }): NodeJS.ProcessEnv {
   const baseEnv = {
@@ -89,7 +90,9 @@ export function buildProviderChildEnvironment(input: {
   };
   const allowedSynaraKeys = new Set(input.inheritedSynaraKeys ?? []);
   const allowedNativeCapabilities = new Set(input.inheritedNativeCapabilityKeys ?? []);
-  const credentialGrants = PROVIDER_CREDENTIAL_GRANTS[input.provider];
+  const credentialGrants = input.credentialKeys
+    ? new Set(input.credentialKeys.map((key) => key.trim().toUpperCase()).filter(Boolean))
+    : PROVIDER_CREDENTIAL_GRANTS[input.provider];
   const childEnv: NodeJS.ProcessEnv = {};
 
   for (const [key, value] of Object.entries(baseEnv)) {

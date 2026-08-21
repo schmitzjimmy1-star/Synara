@@ -2,7 +2,10 @@ import { spawnSync } from "node:child_process";
 
 import { describe, expect, it } from "vitest";
 
-import { buildProviderChildEnvironment } from "./providerChildEnvironment";
+import {
+  buildProviderChildEnvironment,
+  registerProviderCredentialKey,
+} from "./providerChildEnvironment";
 
 describe("buildProviderChildEnvironment", () => {
   it("strips Synara control-plane and inherited native capabilities", () => {
@@ -101,7 +104,7 @@ describe("buildProviderChildEnvironment", () => {
     },
   );
 
-  it.each(["codex", "kilo", "opencode", "pi"] as const)(
+  it.each(["kilo", "opencode", "pi"] as const)(
     "preserves upstream credential discovery for multi-provider %s",
     (provider) => {
       const env = buildProviderChildEnvironment({
@@ -118,6 +121,36 @@ describe("buildProviderChildEnvironment", () => {
       expect(env.OPENAI_API_KEY).toBe("openai-secret");
     },
   );
+
+  it("grants Codex only the active custom provider credential", () => {
+    registerProviderCredentialKey("CUSTOM_RESPONSES_KEY");
+    const env = buildProviderChildEnvironment({
+      provider: "codex",
+      credentialKeys: ["CUSTOM_RESPONSES_KEY"],
+      baseEnv: {
+        OPENAI_API_KEY: "unrelated-openai-secret",
+        ANTHROPIC_API_KEY: "unrelated-anthropic-secret",
+        CUSTOM_RESPONSES_KEY: "selected-provider-secret",
+      },
+    });
+
+    expect(env.CUSTOM_RESPONSES_KEY).toBe("selected-provider-secret");
+    expect(env.OPENAI_API_KEY).toBeUndefined();
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+  });
+
+  it("keeps native Codex limited to its OpenAI credential", () => {
+    const env = buildProviderChildEnvironment({
+      provider: "codex",
+      baseEnv: {
+        OPENAI_API_KEY: "openai-secret",
+        ANTHROPIC_API_KEY: "unrelated-anthropic-secret",
+      },
+    });
+
+    expect(env.OPENAI_API_KEY).toBe("openai-secret");
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+  });
 
   it("keeps stripped authority absent in descendants", () => {
     const env = buildProviderChildEnvironment({

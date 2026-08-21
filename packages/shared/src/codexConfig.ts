@@ -2,104 +2,59 @@
  * Codex config helpers.
  *
  * Parses the small subset of `CODEX_HOME/config.toml` we need for provider
- * discovery without pulling in a full TOML dependency.
+ * discovery. Parsing is read-only; source bytes are never rewritten here.
  */
 import OS from "node:os";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { parse as parseToml, type TomlTable } from "smol-toml";
 
-function readQuotedAssignmentValue(trimmedLine: string, key: string): string | undefined {
-  const match = trimmedLine.match(new RegExp(`^${key}\\s*=\\s*(?:"([^"]+)"|'([^']+)')`));
-  return match?.[1] ?? match?.[2];
-}
-
-function readModelProviderSectionName(trimmedLine: string): string | undefined {
-  const match = trimmedLine.match(
-    /^\[\s*model_providers\.(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9_-]+))\s*\]$/,
+function isTomlTable(value: unknown): value is TomlTable {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    !(value instanceof Date)
   );
-  return match?.[1] ?? match?.[2] ?? match?.[3];
 }
 
-function readSectionQuotedAssignment(
-  content: string,
-  section: string,
-  key: string,
-): string | undefined {
-  let activeSection: string | undefined;
-  for (const line of content.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const sectionMatch = /^\[\s*([^\]]+)\s*\]$/.exec(trimmed);
-    if (sectionMatch) {
-      activeSection = sectionMatch[1]?.trim();
-      continue;
-    }
-    if (activeSection !== section) continue;
-    const value = readQuotedAssignmentValue(trimmed, key);
-    if (value) return value;
+function parseCodexConfig(content: string): TomlTable | undefined {
+  try {
+    return parseToml(content);
+  } catch {
+    return undefined;
   }
-  return undefined;
+}
+
+function readProviderConfig(
+  content: string,
+  provider: string,
+): TomlTable | undefined {
+  const providers = parseCodexConfig(content)?.model_providers;
+  if (!isTomlTable(providers)) return undefined;
+  const providerConfig = providers[provider];
+  return isTomlTable(providerConfig) ? providerConfig : undefined;
 }
 
 export function parseCodexConfigModelProvider(content: string): string | undefined {
-  let inTopLevel = true;
-  for (const line of content.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    if (trimmed.startsWith("[")) {
-      inTopLevel = false;
-      continue;
-    }
-    if (!inTopLevel) continue;
-
-    const provider = readQuotedAssignmentValue(trimmed, "model_provider");
-    if (provider) return provider;
-  }
-
-  return undefined;
+  const provider = parseCodexConfig(content)?.model_provider;
+  return typeof provider === "string" && provider.trim() ? provider.trim() : undefined;
 }
 
 export function parseCodexConfigProviderEnvKey(
   content: string,
   provider: string,
 ): string | undefined {
-  let currentProviderSection: string | undefined;
-
-  for (const line of content.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-
-    if (trimmed.startsWith("[")) {
-      currentProviderSection = readModelProviderSectionName(trimmed);
-      continue;
-    }
-
-    if (currentProviderSection !== provider) continue;
-
-    const envKey = readQuotedAssignmentValue(trimmed, "env_key");
-    if (envKey) return envKey;
-  }
-
-  return undefined;
+  const envKey = readProviderConfig(content, provider)?.env_key;
+  return typeof envKey === "string" && envKey.trim() ? envKey.trim() : undefined;
 }
 
 export function parseCodexConfigProviderBaseUrl(
   content: string,
   provider: string,
 ): string | undefined {
-  let currentProviderSection: string | undefined;
-  for (const line of content.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    if (trimmed.startsWith("[")) {
-      currentProviderSection = readModelProviderSectionName(trimmed);
-      continue;
-    }
-    if (currentProviderSection !== provider) continue;
-    const baseUrl = readQuotedAssignmentValue(trimmed, "base_url");
-    if (baseUrl) return baseUrl;
-  }
-  return undefined;
+  const baseUrl = readProviderConfig(content, provider)?.base_url;
+  return typeof baseUrl === "string" && baseUrl.trim() ? baseUrl.trim() : undefined;
 }
 
 export function isOpenRouterCodexConfig(content: string): boolean {
@@ -107,12 +62,73 @@ export function isOpenRouterCodexConfig(content: string): boolean {
   return (
     parseCodexConfigModelProvider(content) === "openrouter" &&
     baseUrl === "https://openrouter.ai/api/v1" &&
-    readSectionQuotedAssignment(content, "model_providers.openrouter", "wire_api") ===
-      "responses" &&
-    (parseCodexConfigProviderEnvKey(content, "openrouter") !== undefined ||
-      readSectionQuotedAssignment(content, "model_providers.openrouter.auth", "command") !==
-        undefined)
+    isCodexResponsesProviderConfig(content)
   );
+}
+
+export type CodexCustomProviderProfile = {
+  readonly provider: string;
+  readonly baseUrl: string;
+  readonly wireApi: string;
+  readonly credentialSource: "env" | "command";
+};
+
+/**
+ * Reads the active cloud model-provider profile without mutating or normalizing
+ * the user's TOML. A usable custom profile must identify its endpoint and a
+ * credential source. HTTP endpoints fail closed because Codex would send the
+ * provider credential and prompt contents over that connection.
+ */
+export function parseCodexCustomProviderProfile(
+  content: string,
+): CodexCustomProviderProfile | undefined {
+  const provider = parseCodexConfigModelProvider(content);
+  if (!provider || provider === "openai") return undefined;
+
+  const rawBaseUrl = parseCodexConfigProviderBaseUrl(content, provider);
+  const providerConfig = readProviderConfig(content, provider);
+  if (!rawBaseUrl || !providerConfig) return undefined;
+  const configuredWireApi = providerConfig.wire_api;
+  if (configuredWireApi !== undefined && typeof configuredWireApi !== "string") return undefined;
+  const wireApi = configuredWireApi ?? "responses";
+
+  let baseUrl: string;
+  try {
+    const parsed = new URL(rawBaseUrl);
+    if (
+      parsed.protocol !== "https:" ||
+      parsed.username.length > 0 ||
+      parsed.password.length > 0 ||
+      parsed.search.length > 0 ||
+      parsed.hash.length > 0
+    ) {
+      return undefined;
+    }
+    parsed.pathname = parsed.pathname.replace(/\/+$/, "");
+    baseUrl = parsed.toString().replace(/\/$/, "");
+  } catch {
+    return undefined;
+  }
+
+  const auth = providerConfig.auth;
+  if (auth !== undefined && !isTomlTable(auth)) return undefined;
+  const authCommand = isTomlTable(auth) ? auth.command : undefined;
+  if (authCommand !== undefined && (typeof authCommand !== "string" || !authCommand.trim())) {
+    return undefined;
+  }
+  const envKey = parseCodexConfigProviderEnvKey(content, provider);
+  const command = typeof authCommand === "string" ? authCommand.trim() : undefined;
+  // Codex treats these as mutually exclusive authority sources. Refuse to guess
+  // which credential should win when a profile accidentally configures both.
+  if (envKey && command) return undefined;
+  const credentialSource = envKey ? "env" : command ? "command" : undefined;
+  if (!credentialSource) return undefined;
+
+  return { provider, baseUrl, wireApi, credentialSource };
+}
+
+export function isCodexResponsesProviderConfig(content: string): boolean {
+  return parseCodexCustomProviderProfile(content)?.wireApi === "responses";
 }
 
 export function parseCodexConfigActiveProviderEnvKey(content: string): string | undefined {

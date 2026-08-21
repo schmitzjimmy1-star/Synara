@@ -9,7 +9,11 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { parse as parseToml, stringify as stringifyToml, type TomlTable } from "smol-toml";
 
-import { readActiveCodexProviderEnvKey } from "@synara/shared/codexConfig";
+import {
+  parseCodexConfigModelProvider,
+  readActiveCodexProviderEnvKey,
+  readCodexConfigContent,
+} from "@synara/shared/codexConfig";
 import {
   readEnvironmentFromLoginShell,
   resolveLoginShell,
@@ -639,14 +643,21 @@ export async function buildCodexProcessEnv(
         ? { ...baseEnv, CODEX_HOME: overlayHomePath ?? input.homePath }
         : baseEnv;
   const platform = input.platform ?? process.platform;
-  const effectiveEnv = buildProviderChildEnvironment({
-    provider: "codex",
-    baseEnv: configuredEnv,
-  });
-  const providerEnvKey = readActiveCodexProviderEnvKey(effectiveEnv);
+  const configContent = readCodexConfigContent(configuredEnv);
+  const activeModelProvider = configContent
+    ? parseCodexConfigModelProvider(configContent)
+    : undefined;
+  const providerEnvKey = readActiveCodexProviderEnvKey(configuredEnv);
   if (providerEnvKey) {
     registerProviderCredentialKey(providerEnvKey);
   }
+  const effectiveEnv = buildProviderChildEnvironment({
+    provider: "codex",
+    baseEnv: configuredEnv,
+    ...(activeModelProvider && activeModelProvider !== "openai"
+      ? { credentialKeys: providerEnvKey ? [providerEnvKey] : [] }
+      : {}),
+  });
 
   if (platform === "darwin" || platform === "linux") {
     try {

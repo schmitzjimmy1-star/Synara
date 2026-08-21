@@ -294,6 +294,68 @@ describe("ProviderDiscoveryService.listModels", () => {
     });
   });
 
+  it("curates configured slugs for an arbitrary Responses-compatible profile", async () => {
+    await writeFile(
+      path.join(homeDir, ".codex-openrouter", "config.toml"),
+      [
+        'model_provider = "acme"',
+        "[model_providers.acme]",
+        'base_url = "https://models.acme.test/v1"',
+        'env_key = "ACME_API_KEY"',
+      ].join("\n"),
+    );
+
+    const result = await runListModels({
+      adapter: {
+        listModels: () =>
+          Effect.succeed({
+            models: [{ slug: "cursor-model", name: "Cursor Model" }],
+            source: "codex-app-server",
+            cached: false,
+          }),
+      },
+      enabled: true,
+    });
+
+    expect(result.models.map((model) => model.slug)).toEqual([
+      "cursor-model",
+      "valid-model",
+      "invalid-model",
+    ]);
+    expect(result.source).toBe("codex-app-server+curated");
+  });
+
+  it("does not curate configured slugs for an explicit non-Responses profile", async () => {
+    await writeFile(
+      path.join(homeDir, ".codex-openrouter", "config.toml"),
+      [
+        'model_provider = "chat-host"',
+        "[model_providers.chat-host]",
+        'base_url = "https://chat.example.test/v1"',
+        'wire_api = "chat"',
+        'env_key = "CHAT_HOST_KEY"',
+      ].join("\n"),
+    );
+
+    const result = await runListModels({
+      adapter: {
+        listModels: () =>
+          Effect.succeed({
+            models: [{ slug: "native-model", name: "Native Model" }],
+            source: "codex-app-server",
+            cached: false,
+          }),
+      },
+      enabled: true,
+    });
+
+    expect(result).toEqual({
+      models: [{ slug: "native-model", name: "Native Model" }],
+      source: "codex-app-server",
+      cached: false,
+    });
+  });
+
   it("repairs malformed configured model descriptors with allowlist metadata", async () => {
     const result = await runListModels({
       adapter: {

@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   isOpenRouterCodexConfig,
+  isCodexResponsesProviderConfig,
+  parseCodexCustomProviderProfile,
   parseCodexConfigActiveProviderEnvKey,
   parseCodexConfigModelProvider,
   parseCodexConfigProviderEnvKey,
@@ -103,6 +105,98 @@ describe("isOpenRouterCodexConfig", () => {
         ].join("\n"),
       ),
     ).toBe(false);
+  });
+});
+
+describe("parseCodexCustomProviderProfile", () => {
+  it("recognizes a quoted Responses provider using command auth", () => {
+    const content = [
+      'model_provider = "my-company-proxy"',
+      '[model_providers."my-company-proxy"]',
+      'base_url = "https://models.example.test/api/v1/"',
+      'wire_api = "responses"',
+      '[model_providers."my-company-proxy".auth]',
+      'command = "security"',
+    ].join("\n");
+
+    expect(parseCodexCustomProviderProfile(content)).toEqual({
+      provider: "my-company-proxy",
+      baseUrl: "https://models.example.test/api/v1",
+      wireApi: "responses",
+      credentialSource: "command",
+    });
+    expect(isCodexResponsesProviderConfig(content)).toBe(true);
+  });
+
+  it("uses Responses when wire_api is omitted without changing the source profile", () => {
+    const content = [
+      'model_provider = "custom"',
+      "[model_providers.custom]",
+      'base_url = "https://models.example.test/v1/"',
+      'env_key = "CUSTOM_API_KEY"',
+    ].join("\n");
+    const original = content.slice();
+
+    expect(parseCodexCustomProviderProfile(content)).toEqual({
+      provider: "custom",
+      baseUrl: "https://models.example.test/v1",
+      wireApi: "responses",
+      credentialSource: "env",
+    });
+    expect(content).toBe(original);
+  });
+
+  it("describes authenticated non-Responses providers without marking them compatible", () => {
+    const content = [
+      'model_provider = "chat-host"',
+      "[model_providers.chat-host]",
+      'base_url = "https://chat.example.test/v1"',
+      'wire_api = "chat"',
+      'env_key = "CHAT_HOST_KEY"',
+    ].join("\n");
+
+    expect(parseCodexCustomProviderProfile(content)?.wireApi).toBe("chat");
+    expect(isCodexResponsesProviderConfig(content)).toBe(false);
+  });
+
+  it.each([
+    ["an insecure endpoint", 'base_url = "http://models.example.test/v1"'],
+    ["a URL containing credentials", 'base_url = "https://token@models.example.test/v1"'],
+    ["a missing credential source", 'base_url = "https://models.example.test/v1"'],
+  ])("fails closed for %s", (_label, baseUrlLine) => {
+    expect(
+      parseCodexCustomProviderProfile(
+        ['model_provider = "custom"', "[model_providers.custom]", baseUrlLine, 'wire_api = "responses"'].join(
+          "\n",
+        ),
+      ),
+    ).toBeUndefined();
+  });
+
+  it("fails closed for malformed TOML", () => {
+    const content = [
+      'model_provider = "custom"',
+      "[model_providers.custom",
+      'base_url = "https://models.example.test/v1"',
+      'env_key = "CUSTOM_API_KEY"',
+    ].join("\n");
+
+    expect(parseCodexCustomProviderProfile(content)).toBeUndefined();
+    expect(parseCodexConfigModelProvider(content)).toBeUndefined();
+  });
+
+  it("fails closed when env and command auth are both configured", () => {
+    const content = [
+      'model_provider = "custom"',
+      "[model_providers.custom]",
+      'base_url = "https://models.example.test/v1"',
+      'env_key = "CUSTOM_API_KEY"',
+      "[model_providers.custom.auth]",
+      'command = "security"',
+    ].join("\n");
+
+    expect(parseCodexCustomProviderProfile(content)).toBeUndefined();
+    expect(isCodexResponsesProviderConfig(content)).toBe(false);
   });
 });
 

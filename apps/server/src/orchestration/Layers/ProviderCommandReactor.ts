@@ -16,7 +16,6 @@ import {
   type ProviderInteractionMode,
   type ProviderRuntimeEvent,
   ProviderKind,
-  OPENROUTER_CODEX_DEFAULT_MODEL,
   type ProviderReviewTarget,
   type ProviderStartOptions,
   type ProviderSkillReference,
@@ -1175,28 +1174,13 @@ const make = Effect.gen(function* () {
     const threadProvider: ProviderKind = "codex";
     const preferredProvider: ProviderKind = "codex";
     const settingsSnapshot = yield* serverSettings.getSnapshot;
-    const openRouterProfileActive =
-      settingsSnapshot.settings.providers.codex.homePath.trim().length > 0 &&
-      settingsSnapshot.settings.providers.codex.customModels.includes(
-        OPENROUTER_CODEX_DEFAULT_MODEL,
-      );
-    const fallbackCodexModel = openRouterProfileActive
-      ? OPENROUTER_CODEX_DEFAULT_MODEL
-      : DEFAULT_MODEL_BY_PROVIDER.codex;
-    const normalizeCodexSelection = (
-      selection: ModelSelection | undefined,
-    ): ModelSelection | undefined =>
-      selection?.provider === "codex" && openRouterProfileActive && !selection.model.includes("/")
-        ? { ...selection, model: OPENROUTER_CODEX_DEFAULT_MODEL }
-        : selection;
-    const requestedModelSelection = normalizeCodexSelection(
-      options?.modelSelection?.provider === "codex" ? options.modelSelection : undefined,
-    );
+    const requestedModelSelection =
+      options?.modelSelection?.provider === "codex" ? options.modelSelection : undefined;
     const desiredModelSelection: ModelSelection =
       requestedModelSelection ??
       (thread.modelSelection.provider === "codex"
-        ? normalizeCodexSelection(thread.modelSelection)!
-        : { provider: "codex", model: fallbackCodexModel });
+        ? thread.modelSelection
+        : { provider: "codex", model: DEFAULT_MODEL_BY_PROVIDER.codex });
     const shouldRegisterContextBootstrap =
       !retiredProviderBinding &&
       thread.session?.status !== "stopped" &&
