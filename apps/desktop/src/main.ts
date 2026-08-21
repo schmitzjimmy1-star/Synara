@@ -160,7 +160,6 @@ import {
   shouldBroadcastDownloadProgress,
   shouldCheckForUpdatesOnForeground,
 } from "./updateState";
-import { registerDesktopVoiceTranscriptionHandler } from "./voiceTranscription";
 import {
   applyDesktopPhysicalZoomAction,
   resolveDesktopMenuAccelerator,
@@ -4229,7 +4228,6 @@ function registerIpcHandlers(): void {
   if (appSnapManager) {
     registerAppSnapIpcHandlers(ipcMain, appSnapManager);
   }
-  registerDesktopVoiceTranscriptionHandler();
   startBrowserPerformanceLogging();
   registerBrowserIpcHandlers(ipcMain, browserManager);
   registerAgentBrowserIpcHandlers(ipcMain, agentBrowserManager);

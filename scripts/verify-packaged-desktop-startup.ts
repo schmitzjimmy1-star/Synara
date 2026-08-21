@@ -223,6 +223,10 @@ export function createPackagedDesktopSmokeEnvironment(
     if (path) mkdirSync(path, { recursive: true });
   }
   if (options.platform === "mac") {
+    const requireCodexFallback = env.SYNARA_SMOKE_REQUIRE_CODEX_FALLBACK === "1";
+    // Model a Finder launch: do not inherit a terminal-installed Codex from the
+    // smoke runner. Synara must resolve a verified bundled application binary.
+    if (requireCodexFallback) env.PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
     const userDataPath = join(env.HOME!, "Library", "Application Support", "synara");
     mkdirSync(userDataPath, { recursive: true });
     // Prevent the packaged app's update-only icon repair from registering this
@@ -271,13 +275,29 @@ async function terminateProcessTree(child: ChildProcess): Promise<void> {
   await waitForExit(child, 2_000);
 }
 
-function hasStartupProof(logPath: string): boolean {
+function hasStartupProof(
+  desktopLogPath: string,
+  backendLogPath: string,
+  platform: PackagedDesktopPlatform,
+): boolean {
   try {
-    const log = readFileSync(logPath, "utf8");
+    const desktopLog = readFileSync(desktopLogPath, "utf8");
+    const desktopReady =
+      desktopLog.includes("app ready") &&
+      desktopLog.includes("bootstrap main window created") &&
+      desktopLog.includes("bootstrap backend ready source=");
+    if (
+      !desktopReady ||
+      platform !== "mac" ||
+      process.env.SYNARA_SMOKE_REQUIRE_CODEX_FALLBACK !== "1"
+    ) {
+      return desktopReady;
+    }
+    const backendLog = readFileSync(backendLogPath, "utf8");
     return (
-      log.includes("app ready") &&
-      log.includes("bootstrap main window created") &&
-      log.includes("bootstrap backend ready source=")
+      backendLog.includes("Codex provider health resolved executable") &&
+      backendLog.includes("official-app") &&
+      backendLog.includes("/Applications/")
     );
   } catch {
     return false;
@@ -310,6 +330,7 @@ export async function verifyPackagedDesktopStartup(
     const launch = prepareLaunch(options, extractionRoot);
     const env = createPackagedDesktopSmokeEnvironment(join(temporaryRoot, "state"), options);
     const logPath = join(env.SYNARA_HOME!, "userdata", "logs", "desktop-main.log");
+    const backendLogPath = join(env.SYNARA_HOME!, "userdata", "logs", "server-child.log");
     child = spawn(launch.command, [...launch.args], {
       cwd: launch.cwd,
       env,
@@ -333,7 +354,7 @@ export async function verifyPackagedDesktopStartup(
 
     const deadline = Date.now() + options.timeoutMs;
     while (Date.now() < deadline) {
-      if (hasStartupProof(logPath)) {
+      if (hasStartupProof(logPath, backendLogPath, options.platform)) {
         console.log(
           `Packaged ${options.platform}/${options.arch} startup smoke passed from isolated state.`,
         );

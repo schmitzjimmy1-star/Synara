@@ -191,9 +191,6 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     readSnapshot: () => ipcRenderer.sendSync(IPC.storageMigration.read),
     acknowledgeSnapshot: () => ipcRenderer.invoke(IPC.storageMigration.acknowledge),
   },
-  server: {
-    transcribeVoice: (input) => ipcRenderer.invoke(IPC.transcribeVoice, input),
-  },
   browser: {
     open: (input) => ipcRenderer.invoke(IPC.browser.open, input),
     close: (input) => ipcRenderer.invoke(IPC.browser.close, input),

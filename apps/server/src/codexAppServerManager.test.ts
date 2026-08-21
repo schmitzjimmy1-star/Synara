@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import {
+  chmodSync,
+  existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -25,7 +27,6 @@ import {
   CodexAppServerManager,
   classifyCodexStderrLine,
   formatCodexThreadResumeError,
-  isRecoverableThreadResumeError,
   normalizeCodexModelSlug,
   readCodexAccountSnapshot,
   resolveCodexModelForAccount,
@@ -1228,28 +1229,6 @@ describe("normalizeCodexModelSlug", () => {
   });
 });
 
-describe("isRecoverableThreadResumeError", () => {
-  it("matches not-found resume errors", () => {
-    expect(
-      isRecoverableThreadResumeError(new Error("thread/resume failed: thread not found")),
-    ).toBe(true);
-  });
-
-  it("ignores non-resume errors", () => {
-    expect(
-      isRecoverableThreadResumeError(new Error("thread/start failed: permission denied")),
-    ).toBe(false);
-  });
-
-  it("ignores non-recoverable resume errors", () => {
-    expect(
-      isRecoverableThreadResumeError(
-        new Error("thread/resume failed: timed out waiting for server"),
-      ),
-    ).toBe(false);
-  });
-});
-
 describe("buildCodexThreadOpenRequest", () => {
   const sessionOverrides = {
     model: null,
@@ -1325,6 +1304,64 @@ describe("formatCodexThreadResumeError", () => {
   it("preserves unrelated resume errors", () => {
     const original = new Error("thread/resume failed: permission denied");
     expect(formatCodexThreadResumeError(original, "external-thread")).toBe(original);
+  });
+});
+
+describe("startSession resume failure", () => {
+  it("fails closed instead of silently starting a fresh Codex thread", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "synara-resume-fail-closed-"));
+    const binaryPath = path.join(root, "codex");
+    const startMarkerPath = path.join(root, "thread-start-called");
+    writeFileSync(
+      binaryPath,
+      `#!${process.execPath}
+const fs = require("node:fs");
+const readline = require("node:readline");
+if (process.argv.includes("--version")) {
+  process.stdout.write("codex-cli 0.149.0\\n");
+  process.exit(0);
+}
+const lines = readline.createInterface({ input: process.stdin });
+lines.on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.id === undefined) return;
+  if (message.method === "thread/resume") {
+    process.stdout.write(JSON.stringify({ id: message.id, error: { code: -32000, message: "thread not found" } }) + "\\n");
+    return;
+  }
+  if (message.method === "thread/start") {
+    fs.writeFileSync(${JSON.stringify(startMarkerPath)}, "called");
+    process.stdout.write(JSON.stringify({ id: message.id, result: { thread: { id: "fresh-thread" } } }) + "\\n");
+    return;
+  }
+  const result = message.method === "account/read" ? { type: "apiKey" } : {};
+  process.stdout.write(JSON.stringify({ id: message.id, result }) + "\\n");
+});
+`,
+    );
+    chmodSync(binaryPath, 0o755);
+
+    const manager = new CodexAppServerManager();
+    const methods: string[] = [];
+    manager.on("event", (event) => methods.push(event.method));
+    try {
+      await expect(
+        manager.startSession({
+          threadId: asThreadId("synara-thread"),
+          provider: "codex",
+          runtimeMode: "full-access",
+          cwd: root,
+          resumeCursor: { threadId: "missing-provider-thread" },
+          providerOptions: { codex: { binaryPath } },
+        }),
+      ).rejects.toThrow("thread/resume failed: thread not found");
+      expect(existsSync(startMarkerPath)).toBe(false);
+      expect(methods).toContain("session/threadResumeFailed");
+      expect(methods).not.toContain("session/threadResumeFallback");
+    } finally {
+      await manager.stopAll();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

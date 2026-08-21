@@ -108,7 +108,9 @@ export async function teardownChildProcessTree(
   teardownProcessTree: typeof teardownProviderProcessTree = teardownProviderProcessTree,
 ): Promise<SupervisedProcessTeardownResult> {
   if (process.pid === undefined) {
-    throw new Error("Cannot prove process exit because the spawned process has no PID.");
+    // Node assigns a PID before returning from a successful OS spawn. An absent PID means
+    // spawning failed before a process existed, so there is no root or descendant tree to reap.
+    return { escalated: false, signalErrors: [] };
   }
   return teardownProcessTree({
     rootPid: process.pid,

@@ -8,6 +8,7 @@ import {
   DEFAULT_GIT_TEXT_GENERATION_REASONING_EFFORT,
 } from "@synara/contracts";
 import { sanitizeGeneratedThreadTitle } from "@synara/shared/chatThreads";
+import { resolveCodexBinary } from "@synara/shared/codexBinary";
 import { resolveCodexHome } from "@synara/shared/codexConfig";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@synara/shared/git";
 import { prepareWindowsSafeProcess } from "@synara/shared/windowsProcess";
@@ -325,7 +326,7 @@ const makeCodexTextGeneration = Effect.gen(function* () {
     providerOptions?: BranchNameGenerationInput["providerOptions"];
   }): Effect.Effect<S["Type"], TextGenerationError, S["DecodingServices"]> =>
     Effect.gen(function* () {
-      const codexBinaryPath = resolveCodexBinaryPath(providerOptions);
+      const configuredCodexBinaryPath = providerOptions?.codex?.binaryPath?.trim() || "codex";
       const resolvedCodexHomePath = resolveCodexHomePath(codexHomePath, providerOptions);
       const resolvedCodexProfile = resolveCodexProfile(providerOptions);
       const schemaPath = yield* writeTempFile(
@@ -361,6 +362,16 @@ const makeCodexTextGeneration = Effect.gen(function* () {
             prepareOverlay: false,
           }),
         );
+        const codexBinaryPath = yield* Effect.try({
+          try: () =>
+            resolveCodexBinary({ configuredPath: configuredCodexBinaryPath, env }).path,
+          catch: (cause) =>
+            new TextGenerationError({
+              operation,
+              detail: cause instanceof Error ? cause.message : "Codex CLI is not available.",
+              cause,
+            }),
+        });
         const args = [
           ...(resolvedCodexProfile ? ["--profile", resolvedCodexProfile] : []),
           "exec",
@@ -711,12 +722,6 @@ const makeCodexTextGeneration = Effect.gen(function* () {
     evaluateAutomationCompletion,
   } satisfies TextGenerationShape;
 });
-
-function resolveCodexBinaryPath(
-  providerOptions: BranchNameGenerationInput["providerOptions"] | undefined,
-): string {
-  return providerOptions?.codex?.binaryPath?.trim() || "codex";
-}
 
 function resolveCodexHomePath(
   codexHomePath: string | undefined,
