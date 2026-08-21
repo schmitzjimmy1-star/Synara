@@ -980,6 +980,8 @@ export function useComposerSlashCommands(input: {
       return false;
     },
     [
+      activeProject,
+      activeThread,
       availableBuiltInSlashCommands,
       canOfferSideCommand,
       checkClaudeFastSlashCommandAvailability,
@@ -989,6 +991,7 @@ export function useComposerSlashCommands(input: {
       editorActions,
       handleClearConversation,
       handleInteractionModeChange,
+      isServerThread,
       openForkTargetPicker,
       openFeedbackDialog,
       openReviewTargetPicker,
