@@ -836,6 +836,9 @@ export const OrchestrationThread = Schema.Struct({
   archivedAt: Schema.optional(Schema.NullOr(IsoDateTime)).pipe(
     Schema.withDecodingDefault(() => null),
   ),
+  archiveCommandId: Schema.optional(Schema.NullOr(CommandId)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   settledAt: Schema.optional(Schema.NullOr(IsoDateTime)).pipe(
     Schema.withDecodingDefault(() => null),
   ),
@@ -924,6 +927,9 @@ export const OrchestrationThreadShell = Schema.Struct({
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.optional(Schema.NullOr(IsoDateTime)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
+  archiveCommandId: Schema.optional(Schema.NullOr(CommandId)).pipe(
     Schema.withDecodingDefault(() => null),
   ),
   settledAt: Schema.optional(Schema.NullOr(IsoDateTime)).pipe(

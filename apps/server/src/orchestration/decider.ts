@@ -41,6 +41,7 @@ import {
   CHECKPOINT_REVERT_STARTED_ACTIVITY_KIND,
   CHECKPOINT_REVERT_SUCCEEDED_ACTIVITY_KIND,
   checkpointRevertActiveTurnDetail,
+  checkpointRevertArchiveInProgressDetail,
   checkpointRevertDeleteInProgressDetail,
   checkpointRevertInProgressDetail,
   listActiveProjectsByWorkspaceRoot,
@@ -1314,17 +1315,23 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const occurredAt = nowIso();
       // Deletion historically does not cascade through subagent parentage.
       // Preserve that behavior while making direct Side Chats source-owned.
-      const sidechatThreads = readModel.threads.filter(
-        (candidate) =>
-          candidate.deletedAt === null &&
-          (candidate.sidechatSourceThreadId ?? null) === command.threadId,
-      );
-      const sidechatOwnedThreads = sidechatThreads.flatMap((sidechat) => [
-        sidechat,
-        ...collectLifecycleDescendants(readModel.threads, sidechat.id).filter(
-          (candidate) => candidate.deletedAt === null,
-        ),
-      ]);
+      const sidechatOwnedThreads =
+        (thread.sidechatSourceThreadId ?? null) !== null
+          ? collectLifecycleDescendants(readModel.threads, thread.id).filter(
+              (candidate) => candidate.deletedAt === null,
+            )
+          : readModel.threads
+              .filter(
+                (candidate) =>
+                  candidate.deletedAt === null &&
+                  (candidate.sidechatSourceThreadId ?? null) === command.threadId,
+              )
+              .flatMap((sidechat) => [
+                sidechat,
+                ...collectLifecycleDescendants(readModel.threads, sidechat.id).filter(
+                  (candidate) => candidate.deletedAt === null,
+                ),
+              ]);
       const uniqueSidechatOwnedThreads = [
         ...new Map(sidechatOwnedThreads.map((candidate) => [candidate.id, candidate])).values(),
       ];
@@ -1359,7 +1366,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.archive": {
-      yield* requireThreadNotArchived({
+      const thread = yield* requireThreadNotArchived({
         readModel,
         command,
         threadId: command.threadId,
@@ -1368,9 +1375,22 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       // Side Chats and subagent threads are only reachable through their source,
       // so archive the still-active linked subtree with it. The commanded thread
       // goes last: the command receipt records the final event's aggregate.
-      const lifecycleThreadIds = collectLifecycleDescendants(readModel.threads, command.threadId)
-        .filter((thread) => thread.deletedAt === null && (thread.archivedAt ?? null) === null)
-        .map((thread) => thread.id);
+      const lifecycleThreads = collectLifecycleDescendants(
+        readModel.threads,
+        command.threadId,
+      ).filter(
+        (candidate) => candidate.deletedAt === null && (candidate.archivedAt ?? null) === null,
+      );
+      const revertingThread = [thread, ...lifecycleThreads].find(
+        threadHasCheckpointRevertInProgress,
+      );
+      if (revertingThread) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: checkpointRevertArchiveInProgressDetail(revertingThread.id),
+        });
+      }
+      const lifecycleThreadIds = lifecycleThreads.map((candidate) => candidate.id);
       return [...lifecycleThreadIds, command.threadId].map(
         (threadId): Omit<OrchestrationEvent, "sequence"> => ({
           ...withEventBase({
@@ -1403,7 +1423,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           (candidate) =>
             candidate.deletedAt === null &&
             candidate.archivedAt !== null &&
-            candidate.archivedAt === thread.archivedAt,
+            ((thread.archiveCommandId ?? null) !== null
+              ? (candidate.archiveCommandId ?? null) === thread.archiveCommandId
+              : (candidate.archiveCommandId ?? null) === null &&
+                candidate.archivedAt === thread.archivedAt),
         )
         .map((candidate) => candidate.id);
       return [...lifecycleThreadIds, command.threadId].map(

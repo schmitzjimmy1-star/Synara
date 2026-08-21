@@ -457,6 +457,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           createdAt: "2026-02-24T00:00:02.000Z",
           updatedAt: "2026-02-24T00:00:03.000Z",
           archivedAt: null,
+          archiveCommandId: null,
           settledAt: null,
           deletedAt: null,
           handoff: null,
@@ -1756,6 +1757,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           createdAt: "2026-03-03T00:00:02.000Z",
           updatedAt: "2026-03-03T00:00:03.000Z",
           archivedAt: null,
+          archiveCommandId: null,
           settledAt: null,
           handoff: null,
           session: {
